@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 import streamlit as st
 from database.db import init_db
 from services.study_service import StudyService
@@ -14,9 +21,7 @@ if check_researcher_auth():
     study_service = StudyService()
 
     tab1, tab2 = st.columns([1, 2])
-    
     studies = study_service.get_all_studies()
-    selected_study = None
 
     with tab1:
         st.subheader("Existing Studies")
@@ -30,6 +35,11 @@ if check_researcher_auth():
             st.session_state["active_study_id"] = "NEW"
 
     with tab2:
+        if "study_created_confirmation" in st.session_state:
+            info = st.session_state.pop("study_created_confirmation")
+            st.success(f"🎉 **Study '{info['title']}' created successfully!** ({info['condition']} mode)")
+            st.toast("Study created successfully!", icon="✅")
+
         active_id = st.session_state.get("active_study_id", "NEW")
         if active_id == "NEW":
             render_study_builder(study_service)
@@ -37,7 +47,10 @@ if check_researcher_auth():
             selected_study = study_service.get_study(active_id)
             if selected_study:
                 st.header(f"Editing: {selected_study.title}")
-                st.code(f"Participant Link: /Participant?st={selected_study.token}")
+                
+                # Display Reusable Shareable Link
+                st.markdown("##### 🔗 Shareable Participant Link (Unlimited Responses)")
+                st.info(f"Send this single link to all participants:  \n`.../2_Participant?st={selected_study.token}`")
                 
                 t1, t2 = st.tabs(["Cards / Items", "Starting Categories"])
                 with t1:
