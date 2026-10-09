@@ -2,7 +2,6 @@ import io
 from typing import List, Dict, Any, Tuple
 import pandas as pd
 
-# Supported column aliases mapped to standard internal fields
 TITLE_ALIASES = {'title', 'card', 'cards', 'item', 'items', 'name', 'capacity', 'concept', 'skill', 'strategy', 'idea', 'behavior', 'attribute', 'header'}
 DESC_ALIASES = {'description', 'desc', 'details', 'detail', 'info', 'text', 'definition'}
 EXAMPLE_ALIASES = {'example', 'examples', 'sample'}
@@ -16,45 +15,56 @@ def validate_study_meta(title: str, condition: str) -> Tuple[bool, str]:
         return False, f"Invalid study condition. Must be one of {valid_conditions}"
     return True, ""
 
-def validate_card_csv(csv_bytes: bytes) -> Tuple[bool, str, List[Dict[str, Any]]]:
-    if not csv_bytes:
-        return False, "The uploaded file is empty.", []
-        
-    text = None
-    for encoding in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
+def validate_card_csv(csv_input: Any) -> Tuple[bool, str, List[Dict[str, Any]]]:
+    if csv_input is None:
+        return False, "No CSV file uploaded.", []
+
+    # Handle DataFrame vs Bytes vs String inputs cleanly
+    if isinstance(csv_input, pd.DataFrame):
+        df = csv_input
+    elif isinstance(csv_input, (bytes, bytearray)):
+        if len(csv_input) == 0:
+            return False, "The uploaded file is empty.", []
+        text = None
+        for encoding in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
+            try:
+                text = csv_input.decode(encoding)
+                break
+            except Exception:
+                continue
+        if not text:
+            return False, "Unable to read file encoding. Please save CSV as UTF-8.", []
+
+        lines = text.splitlines()
+        cleaned_lines = []
+        for line in lines:
+            s = line.strip()
+            if s.startswith('"') and s.endswith('"') and s.count(',') >= 1:
+                s = s[1:-1]
+            cleaned_lines.append(s)
+        cleaned_text = "\n".join(cleaned_lines)
+
         try:
-            text = csv_bytes.decode(encoding)
-            break
+            df = pd.read_csv(io.StringIO(cleaned_text), sep=None, engine='python')
         except Exception:
-            continue
-            
-    if not text:
-        return False, "Unable to read file encoding. Please save CSV as UTF-8.", []
-
-    # Clean outer quotes per line
-    lines = text.splitlines()
-    cleaned_lines = []
-    for line in lines:
-        s = line.strip()
-        if s.startswith('"') and s.endswith('"') and s.count(',') >= 1:
-            s = s[1:-1]
-        cleaned_lines.append(s)
-    
-    cleaned_text = "\n".join(cleaned_lines)
-
-    # Auto-detect separator
-    try:
-        df = pd.read_csv(io.StringIO(cleaned_text), sep=None, engine='python')
-    except Exception:
+            try:
+                df = pd.read_csv(io.StringIO(cleaned_text))
+            except Exception as e:
+                return False, f"Failed to parse CSV file: {str(e)}", []
+    elif isinstance(csv_input, str):
+        if not csv_input.strip():
+            return False, "The provided CSV text is empty.", []
         try:
-            df = pd.read_csv(io.StringIO(cleaned_text))
+            df = pd.read_csv(io.StringIO(csv_input))
         except Exception as e:
-            return False, f"Failed to parse CSV file: {str(e)}", []
+            return False, f"Failed to parse CSV text: {str(e)}", []
+    else:
+        return False, "Invalid CSV input format.", []
 
     if df.empty:
         return False, "The CSV file contains no data rows.", []
 
-    # Normalize column names
+    # Flexible column header mapping
     col_map = {}
     for col in df.columns:
         normalized = str(col).strip().strip('"').strip("'").lower().replace(" ", "_")
@@ -67,7 +77,7 @@ def validate_card_csv(csv_bytes: bytes) -> Tuple[bool, str, List[Dict[str, Any]]
         elif normalized in NOTES_ALIASES and 'notes' not in col_map:
             col_map['notes'] = col
 
-    # Fallback: If no recognized title header exists, use column 0 as title
+    # Fallback: Use column 0 if no header matches
     if 'title' not in col_map:
         first_col = df.columns[0]
         col_map['title'] = first_col
@@ -82,11 +92,11 @@ def validate_card_csv(csv_bytes: bytes) -> Tuple[bool, str, List[Dict[str, Any]]
         title_val = str(row[title_col]).strip() if pd.notna(row[title_col]) else ""
         if not title_val or title_val.lower() == 'nan':
             continue
-            
+
         desc_val = str(row[desc_col]).strip() if desc_col and pd.notna(row[desc_col]) else ""
         example_val = str(row[example_col]).strip() if example_col and pd.notna(row[example_col]) else ""
         notes_val = str(row[notes_col]).strip() if notes_col and pd.notna(row[notes_col]) else ""
-        
+
         if desc_val.lower() == 'nan': desc_val = ""
         if example_val.lower() == 'nan': example_val = ""
         if notes_val.lower() == 'nan': notes_val = ""
