@@ -12,94 +12,96 @@ def pluralize_label(label: str) -> str:
     return lbl + 's'
 
 def render_card_sort_workspace(study: Study, cards: List[Card]):
-    # Custom CSS for research-grade index card styling
     st.markdown("""
     <style>
         .card-box {
             background-color: #FFFFFF;
-            border: 1px solid #E0E0E0;
-            border-left: 4px solid #1E88E5;
+            border: 1px solid #CBD5E1;
+            border-left: 5px solid #2563EB;
             border-radius: 8px;
-            padding: 14px;
-            margin-bottom: 12px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            transition: transform 0.1s ease, box-shadow 0.1s ease;
-        }
-        .card-box:hover {
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            padding: 12px 14px;
+            margin-bottom: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.04);
         }
         .card-title {
-            font-size: 16px;
+            font-size: 15px;
             font-weight: 700;
-            color: #1A1A1A;
+            color: #0F172A;
             margin-bottom: 4px;
         }
         .card-desc {
             font-size: 13px;
-            color: #555555;
+            color: #475569;
             line-height: 1.4;
-            margin-bottom: 6px;
+            margin-bottom: 4px;
         }
         .card-example {
-            font-size: 12px;
+            font-size: 11px;
             font-style: italic;
-            color: #777777;
-            background-color: #F8F9FA;
-            padding: 4px 8px;
+            color: #64748B;
+            background-color: #F8FAFC;
+            padding: 3px 6px;
             border-radius: 4px;
             display: inline-block;
         }
-        .category-bucket {
-            background-color: #F4F6F8;
-            border: 2px dashed #CBD5E1;
-            border-radius: 8px;
-            padding: 12px;
-            min-height: 200px;
-            margin-bottom: 16px;
-        }
         .bucket-header {
-            font-size: 16px;
-            font-weight: 600;
+            font-size: 15px;
+            font-weight: 700;
             color: #0F172A;
             border-bottom: 2px solid #E2E8F0;
-            padding-bottom: 8px;
-            margin-bottom: 12px;
+            padding-bottom: 6px;
+            margin-bottom: 10px;
         }
     </style>
     """, unsafe_allow_html=True)
 
     plural_label = pluralize_label(study.item_label)
 
-    # Fetch predefined categories for Hybrid, Closed, or Proposed conditions
+    # Fetch DB starting categories
     db_categories = []
     if study.condition in ["CLOSED", "HYBRID", "PROPOSED"]:
         from services.study_service import StudyService
         svc = StudyService()
         db_categories = [cat.name for cat in svc.cat_repo.get_categories_for_study(study.study_id)]
 
-    # Initialize session state for categories
     if "categories" not in st.session_state or not st.session_state["categories"]:
         st.session_state["categories"] = db_categories.copy()
 
-    # Initialize placements
+    # -------------------------------------------------------------
+    # AUTOMATIC STATE REPAIR: Sync session state with current DB cards
+    # -------------------------------------------------------------
+    current_card_ids = set(c.card_id for c in cards)
+    
     if "placements" not in st.session_state:
         st.session_state["placements"] = {"Unassigned": [c.card_id for c in cards]}
         for cat_name in st.session_state["categories"]:
             st.session_state["placements"][cat_name] = []
+    else:
+        # 1. Remove deleted/stale card IDs from session placements
+        for cat in list(st.session_state["placements"].keys()):
+            st.session_state["placements"][cat] = [
+                cid for cid in st.session_state["placements"][cat] if cid in current_card_ids
+            ]
+        # 2. Add any newly added cards that are missing from placements
+        placed_ids = set(cid for cids in st.session_state["placements"].values() for cid in cids)
+        missing_ids = [c.card_id for c in cards if c.card_id not in placed_ids]
+        if "Unassigned" not in st.session_state["placements"]:
+            st.session_state["placements"]["Unassigned"] = []
+        st.session_state["placements"]["Unassigned"].extend(missing_ids)
 
-    # Keep placements synced with any new categories added
+    # Ensure all active categories exist in placements map
     for cat_name in st.session_state["categories"]:
         if cat_name not in st.session_state["placements"]:
             st.session_state["placements"][cat_name] = []
 
     cards_by_id = {c.card_id: c for c in cards}
 
-    # Top Control Bar: Category Creation
+    # Category Creation Box
     if study.allow_new_categories:
         with st.expander("➕ Create New Category", expanded=(len(st.session_state["categories"]) == 0)):
             c_input, c_btn = st.columns([3, 1])
             with c_input:
-                new_cat_name = st.text_input("Category Name", key="new_cat_input", label_visibility="collapsed", placeholder="Enter category name...")
+                new_cat_name = st.text_input("Category Name", key="new_cat_input", label_visibility="collapsed", placeholder="Enter new category name...")
             with c_btn:
                 if st.button("Add Category", type="primary", use_container_width=True):
                     clean_name = new_cat_name.strip()
@@ -111,7 +113,6 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
 
     st.markdown("---")
 
-    # Main Card Sort Workspace (Split Columns)
     unassigned_ids = st.session_state["placements"].get("Unassigned", [])
     active_categories = st.session_state["categories"]
 
@@ -124,7 +125,36 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
         if not unassigned_ids:
             st.success(f"🎉 All {plural_label.lower()} have been placed into categories!")
         else:
+            # Search filter for large decks
+            search_query = ""
+            if len(unassigned_ids) > 10:
+                search_query = st.text_input("🔍 Search unassigned cards:", placeholder="Type to filter...", key="deck_search").strip().lower()
+
+            filtered_unassigned = []
             for cid in unassigned_ids:
+                c_obj = cards_by_id.get(cid)
+                if c_obj:
+                    if search_query:
+                        if search_query in c_obj.title.lower() or search_query in c_obj.description.lower():
+                            filtered_unassigned.append(cid)
+                    else:
+                        filtered_unassigned.append(cid)
+
+            # Pagination for large decks
+            items_per_page = 10
+            total_items = len(filtered_unassigned)
+            
+            if total_items > items_per_page:
+                total_pages = (total_items + items_per_page - 1) // items_per_page
+                page = st.number_input(f"Page (1 of {total_pages})", min_value=1, max_value=total_pages, value=1, step=1, key="deck_page_num")
+                start_idx = (page - 1) * items_per_page
+                end_idx = min(start_idx + items_per_page, total_items)
+                page_ids = filtered_unassigned[start_idx:end_idx]
+                st.caption(f"Showing items {start_idx + 1}–{end_idx} of {total_items}")
+            else:
+                page_ids = filtered_unassigned
+
+            for cid in page_ids:
                 c_obj = cards_by_id.get(cid)
                 if not c_obj:
                     continue
@@ -142,24 +172,26 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                     )
 
                     if active_categories:
-                        cols = st.columns(min(len(active_categories), 3))
-                        for i, cat in enumerate(active_categories):
-                            col_idx = i % min(len(active_categories), 3)
-                            with cols[col_idx]:
-                                if st.button(f"➡️ {cat}", key=f"move_{cid}_{cat}", use_container_width=True):
-                                    st.session_state["placements"] = SortService.move_card(
-                                        st.session_state["placements"], cid, cat
-                                    )
-                                    st.rerun()
+                        cat_options = ["Move to category..."] + active_categories
+                        selected_cat = st.selectbox(
+                            f"Assign '{c_obj.title}'",
+                            options=cat_options,
+                            key=f"sel_cat_{cid}",
+                            label_visibility="collapsed"
+                        )
+                        if selected_cat != "Move to category...":
+                            st.session_state["placements"] = SortService.move_card(
+                                st.session_state["placements"], cid, selected_cat
+                            )
+                            st.rerun()
                     else:
                         st.caption("👈 Create a category above to start placing cards.")
-                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
 
     with board_col:
         if active_categories:
             st.markdown(f"### 📂 Category Buckets ({len(active_categories)})")
             
-            # Display category columns
             num_cols = min(len(active_categories), 2)
             cat_columns = st.columns(num_cols)
 
@@ -178,7 +210,7 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                     )
 
                     if study.allow_delete_categories:
-                        if st.button("🗑️ Delete Category", key=f"del_cat_{cat_name}", help="Move cards back to unassigned deck and remove category"):
+                        if st.button("🗑️ Delete", key=f"del_cat_{cat_name}", help="Move cards back to unassigned deck and remove category"):
                             st.session_state["placements"]["Unassigned"].extend(placed_ids)
                             del st.session_state["placements"][cat_name]
                             st.session_state["categories"].remove(cat_name)
