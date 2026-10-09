@@ -80,30 +80,26 @@ class StudyService:
         return card
 
     def import_cards_csv(self, study_id: str, csv_file_bytes: bytes) -> Tuple[bool, str]:
-        try:
-            df = pd.read_csv(io.BytesIO(csv_file_bytes))
-            valid, msg, card_dicts = validate_card_csv(df)
-            if not valid:
-                return False, msg
-            
-            existing = self.card_repo.get_cards_for_study(study_id, active_only=False)
-            start_order = len(existing) + 1
-            cards_to_add = []
-            for i, cd in enumerate(card_dicts):
-                cards_to_add.append(Card(
-                    card_id=f"crd_{uuid.uuid4().hex[:10]}",
-                    study_id=study_id,
-                    title=cd["title"],
-                    description=cd["description"],
-                    example=cd["example"],
-                    researcher_notes=cd["researcher_notes"],
-                    display_order=start_order + i,
-                    active=True
-                ))
-            self.card_repo.save_cards(cards_to_add)
-            return True, f"Successfully imported {len(cards_to_add)} cards."
-        except Exception as e:
-            return False, f"CSV parsing error: {str(e)}"
+        valid, msg, card_dicts = validate_card_csv(csv_file_bytes)
+        if not valid:
+            return False, msg
+        
+        existing = self.card_repo.get_cards_for_study(study_id, active_only=False)
+        start_order = len(existing) + 1
+        cards_to_add = []
+        for i, cd in enumerate(card_dicts):
+            cards_to_add.append(Card(
+                card_id=f"crd_{uuid.uuid4().hex[:10]}",
+                study_id=study_id,
+                title=cd["title"],
+                description=cd["description"],
+                example=cd["example"],
+                researcher_notes=cd["researcher_notes"],
+                display_order=start_order + i,
+                active=True
+            ))
+        self.card_repo.save_cards(cards_to_add)
+        return True, f"Successfully imported {len(cards_to_add)} cards."
 
     def export_cards_csv(self, study_id: str) -> str:
         cards = self.card_repo.get_cards_for_study(study_id, active_only=False)
