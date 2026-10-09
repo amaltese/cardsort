@@ -1,3 +1,11 @@
+import sys
+from pathlib import Path
+
+# Explicitly add the app's root folder to Python's module path
+ROOT_DIR = Path(__file__).resolve().parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 import streamlit as st
 from database.db import init_db
 
