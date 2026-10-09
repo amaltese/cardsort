@@ -22,6 +22,11 @@ study_token = query_params.get("st", None)
 study_service = StudyService()
 participant_service = ParticipantService()
 
+def clear_participant_state():
+    for key in ["session_token", "categories", "placements", "completed_code"]:
+        if key in st.session_state:
+            del st.session_state[key]
+
 if not study_token:
     st.title("Participant Portal")
     study_token = st.text_input("Enter your Study Token to begin:")
@@ -31,13 +36,16 @@ if study_token:
     if not study:
         st.error("Invalid study token. Please check your participant link.")
     else:
-        # Get or create participant session
-        sess_token = st.session_state.get("session_token")
-        session_data = participant_service.get_or_create_session(study.study_id, sess_token)
-        st.session_state["session_token"] = session_data["session_token"]
+        # Initialize fresh session if not present
+        if "session_token" not in st.session_state:
+            sess = participant_service.create_fresh_session(study.study_id)
+            st.session_state["session_token"] = sess["session_token"]
 
-        # Check if study is already completed
-        if session_data.get("status") == "completed":
+        sess_token = st.session_state["session_token"]
+        session_data = participant_service.get_session(sess_token)
+
+        # Completion View
+        if session_data and session_data.get("status") == "completed":
             st.balloons()
             st.success("🎉 **Card Sort Submitted Successfully!**")
             
@@ -45,21 +53,19 @@ if study_token:
             st.markdown(
                 f"""
                 <div style="background-color: #F0FDF4; border: 2px solid #22C55E; border-radius: 12px; padding: 24px; text-align: center; margin: 20px 0;">
-                    <h3 style="color: #15803D; margin-bottom: 8px;">Your Completion Code</h3>
+                    <h3 style="color: #15803D; margin-bottom: 8px;">Your Verification Code</h3>
                     <div style="font-size: 32px; font-weight: 800; letter-spacing: 3px; color: #0E7490; font-family: monospace;">{code}</div>
                     <p style="color: #374151; margin-top: 12px; font-size: 14px;">
-                        Please copy this code and send it to your research administrator to confirm your completion.
+                        Please copy this code and provide it to your research administrator to confirm your completion.
                     </p>
                 </div>
                 """,
                 unsafe_allow_html=True
             )
 
-            # Display snapshot summary
             if session_data.get("snapshot_json"):
                 snapshot = json.loads(session_data["snapshot_json"])
-                st.subheader("Summary of Your Submitted Organization")
-                
+                st.subheader("Summary of Submitted Organization")
                 for cat, items in snapshot.get("placements", {}).items():
                     with st.expander(f"📁 {cat} ({len(items)} items)", expanded=True):
                         for item in items:
@@ -68,8 +74,13 @@ if study_token:
                 if snapshot.get("reflection"):
                     st.info(f"**Your Reflection:** {snapshot['reflection']}")
 
+            st.markdown("---")
+            if st.button("🔄 Start New Submission (Testing)", type="secondary"):
+                clear_participant_state()
+                st.rerun()
+
         else:
-            # Active Card Sorting View
+            # Active Sort View
             render_participant_header(study)
             cards = study_service.card_repo.get_cards_for_study(study.study_id, active_only=True)
             
@@ -84,7 +95,6 @@ if study_token:
                 unassigned_ids = st.session_state.get("placements", {}).get("Unassigned", [])
                 plural_lbl = pluralize_label(study.item_label)
 
-                # Optional reflection prompt
                 reflection_q = study.reflection_questions[0] if study.reflection_questions else "Please briefly explain your sorting logic:"
                 reflection_input = st.text_area(f"💬 {reflection_q}", placeholder="Explain why you grouped these items together...", height=100)
 
