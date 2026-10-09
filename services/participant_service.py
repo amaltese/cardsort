@@ -16,18 +16,10 @@ class ParticipantService:
         part2 = secrets.token_hex(2).upper()
         return f"{part1}-{part2}"
 
-    def get_or_create_session(self, study_id: str, session_token: Optional[str] = None) -> Dict[str, Any]:
+    def create_fresh_session(self, study_id: str) -> Dict[str, Any]:
+        new_token = f"sess_{secrets.token_urlsafe(16)}"
         conn = get_connection(self.db_path)
         cursor = conn.cursor()
-
-        if session_token:
-            cursor.execute("SELECT * FROM participant_sessions WHERE session_token = ?", (session_token,))
-            row = cursor.fetchone()
-            if row:
-                conn.close()
-                return dict(row)
-
-        new_token = f"sess_{secrets.token_urlsafe(16)}"
         cursor.execute("""
         INSERT INTO participant_sessions (session_token, study_id, status)
         VALUES (?, ?, 'in_progress')
@@ -38,6 +30,14 @@ class ParticipantService:
         row = cursor.fetchone()
         conn.close()
         return dict(row)
+
+    def get_session(self, session_token: str) -> Optional[Dict[str, Any]]:
+        conn = get_connection(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM participant_sessions WHERE session_token = ?", (session_token,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
 
     def submit_sort(
         self,
@@ -50,7 +50,6 @@ class ParticipantService:
         completion_code = self.generate_completion_code()
         cards_by_id = {c.card_id: c.title for c in cards}
 
-        # Build readable structure for snapshot
         final_summary = {}
         for cat_name, card_ids in placements.items():
             if cat_name == "Unassigned" and not card_ids:
@@ -69,10 +68,8 @@ class ParticipantService:
         conn = get_connection(self.db_path)
         cursor = conn.cursor()
 
-        # 1. Clear existing placements for this session
         cursor.execute("DELETE FROM card_placements WHERE session_token = ?", (session_token,))
 
-        # 2. Insert card placements
         for cat_name, card_ids in placements.items():
             for order, cid in enumerate(card_ids):
                 placement_id = f"plc_{uuid.uuid4().hex[:10]}"
@@ -81,7 +78,6 @@ class ParticipantService:
                 VALUES (?, ?, ?, ?, ?)
                 """, (placement_id, session_token, cid, cat_name, order))
 
-        # 3. Update session status
         cursor.execute("""
         UPDATE participant_sessions
         SET status = 'completed',
