@@ -23,7 +23,7 @@ st.markdown("""
 Welcome to the asynchronous virtual card-sorting platform designed for educational and professional research studies.
 
 ### Routing Navigation
-* **For Researchers**: Access **1_Researcher** in the sidebar menu to build studies, configure cards, and set sort conditions.
-* **For Participants**: Open the unique study URL provided by your research team or enter a Study Token in **2_Participant**.
-* **For Results**: Access **3_Results** to view incoming participant sorting data.
+* **For Researchers**: Access **Researcher** in the sidebar menu to build studies, configure cards, and set sort conditions.
+* **For Participants**: Open the unique study URL provided by your research team or enter a Study Token in **Participant**.
+* **For Results**: Access **Results** to view incoming participant sorting data.
 """)
