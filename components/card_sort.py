@@ -67,9 +67,7 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
     if "categories" not in st.session_state or not st.session_state["categories"]:
         st.session_state["categories"] = db_categories.copy()
 
-    # -------------------------------------------------------------
-    # AUTOMATIC STATE REPAIR: Sync session state with current DB cards
-    # -------------------------------------------------------------
+    # State Sync with DB cards
     current_card_ids = set(c.card_id for c in cards)
     
     if "placements" not in st.session_state:
@@ -77,26 +75,23 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
         for cat_name in st.session_state["categories"]:
             st.session_state["placements"][cat_name] = []
     else:
-        # 1. Remove deleted/stale card IDs from session placements
         for cat in list(st.session_state["placements"].keys()):
             st.session_state["placements"][cat] = [
                 cid for cid in st.session_state["placements"][cat] if cid in current_card_ids
             ]
-        # 2. Add any newly added cards that are missing from placements
         placed_ids = set(cid for cids in st.session_state["placements"].values() for cid in cids)
         missing_ids = [c.card_id for c in cards if c.card_id not in placed_ids]
         if "Unassigned" not in st.session_state["placements"]:
             st.session_state["placements"]["Unassigned"] = []
         st.session_state["placements"]["Unassigned"].extend(missing_ids)
 
-    # Ensure all active categories exist in placements map
     for cat_name in st.session_state["categories"]:
         if cat_name not in st.session_state["placements"]:
             st.session_state["placements"][cat_name] = []
 
     cards_by_id = {c.card_id: c for c in cards}
 
-    # Category Creation Box
+    # Category Creation Header
     if study.allow_new_categories:
         with st.expander("➕ Create New Category", expanded=(len(st.session_state["categories"]) == 0)):
             c_input, c_btn = st.columns([3, 1])
@@ -116,7 +111,6 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
     unassigned_ids = st.session_state["placements"].get("Unassigned", [])
     active_categories = st.session_state["categories"]
 
-    # Layout: Left = Card Deck | Right = Category Columns
     deck_col, board_col = st.columns([1, 1] if active_categories else [1, 0.01])
 
     with deck_col:
@@ -140,7 +134,7 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                     else:
                         filtered_unassigned.append(cid)
 
-            # Pagination for large decks
+            # Pagination
             items_per_page = 10
             total_items = len(filtered_unassigned)
             
@@ -172,18 +166,31 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                     )
 
                     if active_categories:
-                        cat_options = ["Move to category..."] + active_categories
-                        selected_cat = st.selectbox(
-                            f"Assign '{c_obj.title}'",
-                            options=cat_options,
-                            key=f"sel_cat_{cid}",
-                            label_visibility="collapsed"
-                        )
-                        if selected_cat != "Move to category...":
-                            st.session_state["placements"] = SortService.move_card(
-                                st.session_state["placements"], cid, selected_cat
+                        # Direct Clickable Buttons if <= 6 categories
+                        if len(active_categories) <= 6:
+                            btn_cols = st.columns(min(len(active_categories), 3))
+                            for idx, cat_name in enumerate(active_categories):
+                                col_target = btn_cols[idx % min(len(active_categories), 3)]
+                                with col_target:
+                                    if st.button(f"➡️ {cat_name}", key=f"btn_move_{cid}_{cat_name}", use_container_width=True):
+                                        st.session_state["placements"] = SortService.move_card(
+                                            st.session_state["placements"], cid, cat_name
+                                        )
+                                        st.rerun()
+                        # Dropdown selector fallback if > 6 categories
+                        else:
+                            cat_options = ["Move to category..."] + active_categories
+                            selected_cat = st.selectbox(
+                                f"Assign '{c_obj.title}'",
+                                options=cat_options,
+                                key=f"sel_cat_{cid}",
+                                label_visibility="collapsed"
                             )
-                            st.rerun()
+                            if selected_cat != "Move to category...":
+                                st.session_state["placements"] = SortService.move_card(
+                                    st.session_state["placements"], cid, selected_cat
+                                )
+                                st.rerun()
                     else:
                         st.caption("👈 Create a category above to start placing cards.")
                     st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
