@@ -64,8 +64,13 @@ class StudyService:
         self.study_repo.save_study(study)
         return True, "Study updated successfully."
 
-    def add_card_to_study(self, study_id: str, title: str, description: str = "", example: str = "", notes: str = "") -> Card:
+    def add_card_to_study(
+        self, study_id: str, title: str, description: str = "", example: str = "", notes: str = "",
+        fill: str = "#EFF6FF", text: str = "#0F172A", border: str = "#2563EB"
+    ) -> Card:
         existing_cards = self.card_repo.get_cards_for_study(study_id, active_only=False)
+        if title.strip().casefold() in {card.title.casefold() for card in existing_cards}:
+            raise ValueError("Each card title must be unique within a study so the results remain reliable.")
         card = Card(
             card_id=f"crd_{uuid.uuid4().hex[:10]}",
             study_id=study_id,
@@ -74,7 +79,7 @@ class StudyService:
             example=example.strip(),
             researcher_notes=notes.strip(),
             display_order=len(existing_cards) + 1,
-            active=True
+            active=True, color_fill=fill, color_text=text, color_border=border
         )
         self.card_repo.save_cards([card])
         return card
@@ -85,6 +90,13 @@ class StudyService:
             return False, msg
         
         existing = self.card_repo.get_cards_for_study(study_id, active_only=False)
+        existing_titles = {card.title.casefold() for card in existing}
+        incoming_titles = [card["title"].casefold() for card in card_dicts]
+        duplicate_titles = {title for title in incoming_titles if incoming_titles.count(title) > 1}
+        if duplicate_titles:
+            return False, "The uploaded CSV contains duplicate card titles. Give each card a unique title so results can be analyzed accurately."
+        if existing_titles.intersection(incoming_titles):
+            return False, "One or more CSV card titles already exist in this study. Card titles must be unique."
         start_order = len(existing) + 1
         cards_to_add = []
         for i, cd in enumerate(card_dicts):
@@ -130,3 +142,6 @@ class StudyService:
 
     def get_all_studies(self) -> List[Study]:
         return self.study_repo.get_all_studies()
+
+    def delete_study(self, study_id: str) -> None:
+        self.study_repo.delete_study(study_id)

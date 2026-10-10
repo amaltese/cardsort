@@ -1,12 +1,22 @@
 import os
 import sqlite3
+from pathlib import Path
 
-DB_PATH = os.getenv("DATABASE_PATH", "card_sort.db")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+configured_db_path = Path(os.getenv("DATABASE_PATH", "card_sort.db")).expanduser()
+# Keep the database with the project even when Streamlit is launched from a
+# different working directory. An explicitly absolute DATABASE_PATH still wins.
+DB_PATH = str(configured_db_path if configured_db_path.is_absolute() else PROJECT_ROOT / configured_db_path)
 
 def get_connection(db_path=None):
     target_path = db_path or DB_PATH
     conn = sqlite3.connect(target_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # SQLite does not enforce declared foreign keys unless every connection
+    # explicitly enables them.  This makes study deletion clean up its related
+    # cards, categories, and participant data as intended.
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 def init_db(db_path=None):
@@ -36,7 +46,10 @@ def init_db(db_path=None):
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
-    
+    # “Proposed” was an early label that is no longer offered. Existing data
+    # is equivalent to a closed sort, so migrate it on startup.
+    cursor.execute("UPDATE studies SET condition = 'CLOSED' WHERE condition = 'PROPOSED'")
+
     # Cards table
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS cards (
@@ -48,9 +61,24 @@ def init_db(db_path=None):
         researcher_notes TEXT,
         display_order INTEGER DEFAULT 0,
         active INTEGER DEFAULT 1,
+        color_fill TEXT DEFAULT '#EFF6FF',
+        color_text TEXT DEFAULT '#0F172A',
+        color_border TEXT DEFAULT '#2563EB',
         FOREIGN KEY (study_id) REFERENCES studies (study_id) ON DELETE CASCADE
     )
     ''')
+
+    # Lightweight migrations for databases created before card colors existed.
+    # SQLite's CREATE TABLE IF NOT EXISTS does not add new columns to an
+    # existing table, so check before altering it.
+    card_columns = {row["name"] for row in cursor.execute("PRAGMA table_info(cards)")}
+    for name, default in {
+        "color_fill": "'#EFF6FF'",
+        "color_text": "'#0F172A'",
+        "color_border": "'#2563EB'",
+    }.items():
+        if name not in card_columns:
+            cursor.execute(f"ALTER TABLE cards ADD COLUMN {name} TEXT DEFAULT {default}")
     
     # Categories table
     cursor.execute('''

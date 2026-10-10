@@ -1,4 +1,6 @@
 import streamlit as st
+import html
+import re
 from typing import List, Dict
 from database.models import Study, Card
 from services.sort_service import SortService
@@ -11,7 +13,11 @@ def pluralize_label(label: str) -> str:
         return lbl + 'es'
     return lbl + 's'
 
-def render_card_sort_workspace(study: Study, cards: List[Card]):
+def _safe_color(value: str, fallback: str) -> str:
+    return value if re.fullmatch(r"#[0-9a-fA-F]{6}", value or "") else fallback
+
+
+def render_card_sort_workspace(study: Study, cards: List[Card], participant_service=None, session_token: str = ""):
     st.markdown("""
     <style>
         .card-box {
@@ -59,13 +65,35 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
 
     # Fetch DB starting categories
     db_categories = []
-    if study.condition in ["CLOSED", "HYBRID", "PROPOSED"]:
+    if study.condition in ["CLOSED", "HYBRID"]:
         from services.study_service import StudyService
         svc = StudyService()
-        db_categories = [cat.name for cat in svc.cat_repo.get_categories_for_study(study.study_id)]
+        db_category_objects = svc.cat_repo.get_categories_for_study(study.study_id)
+        db_categories = [cat.name for cat in db_category_objects]
+    else:
+        db_category_objects = []
+    default_category_style = {"fill": "#E0F2FE", "text": "#0C4A6E", "border": "#0284C7"}
+    category_styles = {}
+    for index, category in enumerate(db_category_objects):
+        style = {
+            "fill": _safe_color(category.color_fill, default_category_style["fill"]),
+            "text": _safe_color(category.color_text, default_category_style["text"]),
+            "border": _safe_color(category.color_border, default_category_style["border"]),
+            "description": category.description,
+        }
+        # Earlier versions created categories with a white-on-white default.
+        # Show those legacy defaults as a calm blue until the researcher picks
+        # a different color in the category editor.
+        if (style["fill"], style["text"], style["border"]) == ("#FFFFFF", "#000000", "#CCCCCC"):
+            style.update(default_category_style)
+        category_styles[category.name] = style
 
     if "categories" not in st.session_state or not st.session_state["categories"]:
         st.session_state["categories"] = db_categories.copy()
+    if "category_descriptions" not in st.session_state:
+        st.session_state["category_descriptions"] = {
+            category.name: category.description for category in db_category_objects
+        }
 
     # State Sync with DB cards
     current_card_ids = set(c.card_id for c in cards)
@@ -103,6 +131,11 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                     if clean_name and clean_name not in st.session_state["categories"] and clean_name != "Unassigned":
                         st.session_state["categories"].append(clean_name)
                         st.session_state["placements"][clean_name] = []
+                        st.session_state["category_descriptions"][clean_name] = ""
+                        if participant_service:
+                            participant_service.record_interaction(
+                                session_token, study, "category_created", {"category": clean_name}
+                            )
                         st.success(f"Added category '{clean_name}'")
                         st.rerun()
 
@@ -111,7 +144,9 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
     unassigned_ids = st.session_state["placements"].get("Unassigned", [])
     active_categories = st.session_state["categories"]
 
-    deck_col, board_col = st.columns([1, 1] if active_categories else [1, 0.01])
+    # A stacked workspace keeps the participant focused on the unsorted card
+    # while still making their organized categories easy to review below.
+    deck_col = st.container()
 
     with deck_col:
         st.markdown(f"### 🎴 Unassigned Deck ({len(unassigned_ids)} {plural_label})")
@@ -154,12 +189,17 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                     continue
 
                 with st.container():
+                    card_fill = _safe_color(c_obj.color_fill, "#EFF6FF")
+                    if card_fill == "#FFFFFF":
+                        card_fill = "#EFF6FF"
+                    card_text = _safe_color(c_obj.color_text, "#0F172A")
+                    card_border = _safe_color(c_obj.color_border, "#2563EB")
                     st.markdown(
                         f"""
-                        <div class="card-box">
-                            <div class="card-title">{c_obj.title}</div>
-                            {f'<div class="card-desc">{c_obj.description}</div>' if c_obj.description else ''}
-                            {f'<div class="card-example">e.g. {c_obj.example}</div>' if c_obj.example else ''}
+                        <div class="card-box" style="background:{card_fill}; color:{card_text}; border-left-color:{card_border};">
+                            <div class="card-title" style="color:{card_text};">{html.escape(c_obj.title)}</div>
+                            {f'<div class="card-desc">{html.escape(c_obj.description)}</div>' if c_obj.description else ''}
+                            {f'<div class="card-example">e.g. {html.escape(c_obj.example)}</div>' if c_obj.example else ''}
                         </div>
                         """,
                         unsafe_allow_html=True
@@ -176,6 +216,10 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                                         st.session_state["placements"] = SortService.move_card(
                                             st.session_state["placements"], cid, cat_name
                                         )
+                                        if participant_service:
+                                            participant_service.record_interaction(
+                                                session_token, study, "card_moved", {"card_id": cid, "category": cat_name}
+                                            )
                                         st.rerun()
                         # Dropdown selector fallback if > 6 categories
                         else:
@@ -190,27 +234,34 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                                 st.session_state["placements"] = SortService.move_card(
                                     st.session_state["placements"], cid, selected_cat
                                 )
+                                if participant_service:
+                                    participant_service.record_interaction(
+                                        session_token, study, "card_moved", {"card_id": cid, "category": selected_cat}
+                                    )
                                 st.rerun()
                     else:
                         st.caption("👈 Create a category above to start placing cards.")
                     st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
 
+    st.markdown("---")
+    board_col = st.container()
     with board_col:
         if active_categories:
             st.markdown(f"### 📂 Category Buckets ({len(active_categories)})")
             
-            num_cols = min(len(active_categories), 2)
+            num_cols = min(len(active_categories), 3)
             cat_columns = st.columns(num_cols)
 
             for idx, cat_name in enumerate(active_categories):
                 col_target = cat_columns[idx % num_cols]
                 with col_target:
                     placed_ids = st.session_state["placements"].get(cat_name, [])
+                    style = category_styles.get(cat_name, default_category_style)
                     
                     st.markdown(
                         f"""
-                        <div class="bucket-header">
-                            🏷️ {cat_name} <span style="font-weight:normal; font-size:13px; color:#64748B;">({len(placed_ids)})</span>
+                        <div class="bucket-header" style="background:{style['fill']}; color:{style['text']}; border:2px solid {style['border']}; border-radius:6px; padding:8px;">
+                            🏷️ {html.escape(cat_name)} <span style="font-weight:normal; font-size:13px;">({len(placed_ids)})</span>
                         </div>
                         """,
                         unsafe_allow_html=True
@@ -221,7 +272,35 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                             st.session_state["placements"]["Unassigned"].extend(placed_ids)
                             del st.session_state["placements"][cat_name]
                             st.session_state["categories"].remove(cat_name)
+                            st.session_state["category_descriptions"].pop(cat_name, None)
+                            if participant_service:
+                                participant_service.record_interaction(
+                                    session_token, study, "category_deleted", {"category": cat_name}
+                                )
                             st.rerun()
+
+                    if study.allow_rename_categories:
+                        renamed = st.text_input("Rename category", value=cat_name, key=f"rename_{cat_name}")
+                        if st.button("Rename", key=f"rename_button_{cat_name}"):
+                            clean_name = renamed.strip()
+                            if not clean_name or clean_name == "Unassigned" or clean_name in st.session_state["categories"] and clean_name != cat_name:
+                                st.error("Choose a unique category name.")
+                            elif clean_name != cat_name:
+                                st.session_state["placements"][clean_name] = st.session_state["placements"].pop(cat_name)
+                                st.session_state["categories"][st.session_state["categories"].index(cat_name)] = clean_name
+                                description = st.session_state["category_descriptions"].pop(cat_name, "")
+                                st.session_state["category_descriptions"][clean_name] = description
+                                if participant_service:
+                                    participant_service.record_interaction(
+                                        session_token, study, "category_renamed", {"from": cat_name, "to": clean_name}
+                                    )
+                                st.rerun()
+
+                    if study.allow_category_descriptions:
+                        current_description = st.session_state["category_descriptions"].get(cat_name, "")
+                        st.session_state["category_descriptions"][cat_name] = st.text_input(
+                            "Category description", value=current_description, key=f"desc_{cat_name}"
+                        )
 
                     if not placed_ids:
                         st.caption("*Empty bucket*")
@@ -233,8 +312,8 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                             
                             st.markdown(
                                 f"""
-                                <div style="background:#FFFFFF; border:1px solid #CBD5E1; border-radius:6px; padding:8px 12px; margin-bottom:6px;">
-                                    <span style="font-weight:600; font-size:14px;">{c_obj.title}</span>
+                                <div style="background:{_safe_color(c_obj.color_fill, '#FFFFFF')}; color:{_safe_color(c_obj.color_text, '#0F172A')}; border:1px solid {_safe_color(c_obj.color_border, '#CBD5E1')}; border-radius:6px; padding:8px 12px; margin-bottom:6px;">
+                                    <span style="font-weight:600; font-size:14px;">{html.escape(c_obj.title)}</span>
                                 </div>
                                 """,
                                 unsafe_allow_html=True
@@ -243,5 +322,9 @@ def render_card_sort_workspace(study: Study, cards: List[Card]):
                                 st.session_state["placements"] = SortService.move_card(
                                     st.session_state["placements"], cid, "Unassigned"
                                 )
+                                if participant_service:
+                                    participant_service.record_interaction(
+                                        session_token, study, "card_moved", {"card_id": cid, "category": "Unassigned"}
+                                    )
                                 st.rerun()
                     st.markdown("<hr style='margin: 12px 0;'>", unsafe_allow_html=True)

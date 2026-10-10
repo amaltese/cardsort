@@ -66,6 +66,14 @@ class StudyRepository:
         conn.close()
         return [self._map_study(row) for row in rows]
 
+    def delete_study(self, study_id: str) -> None:
+        conn = get_connection(self.db_path)
+        try:
+            conn.execute("DELETE FROM studies WHERE study_id = ?", (study_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
     def _map_study(self, row: sqlite3.Row) -> Study:
         return Study(
             study_id=row["study_id"],
@@ -97,13 +105,15 @@ class CardRepository:
         cursor = conn.cursor()
         for card in cards:
             cursor.execute("""
-            INSERT INTO cards (card_id, study_id, title, description, example, researcher_notes, display_order, active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO cards (card_id, study_id, title, description, example, researcher_notes, display_order, active, color_fill, color_text, color_border)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(card_id) DO UPDATE SET
                 title=excluded.title, description=excluded.description,
                 example=excluded.example, researcher_notes=excluded.researcher_notes,
-                display_order=excluded.display_order, active=excluded.active
-            """, (card.card_id, card.study_id, card.title, card.description, card.example, card.researcher_notes, card.display_order, int(card.active)))
+                display_order=excluded.display_order, active=excluded.active,
+                color_fill=excluded.color_fill, color_text=excluded.color_text,
+                color_border=excluded.color_border
+            """, (card.card_id, card.study_id, card.title, card.description, card.example, card.researcher_notes, card.display_order, int(card.active), card.color_fill, card.color_text, card.color_border))
         conn.commit()
         conn.close()
 
@@ -127,7 +137,8 @@ class CardRepository:
             card_id=r["card_id"], study_id=r["study_id"], title=r["title"],
             description=r["description"] or "", example=r["example"] or "",
             researcher_notes=r["researcher_notes"] or "", display_order=r["display_order"],
-            active=bool(r["active"])
+            active=bool(r["active"]), color_fill=r["color_fill"] or "#FFFFFF",
+            color_text=r["color_text"] or "#0F172A", color_border=r["color_border"] or "#2563EB"
         ) for r in rows]
 
 class CategoryRepository:

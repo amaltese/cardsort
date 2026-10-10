@@ -10,7 +10,7 @@ NOTES_ALIASES = {'notes', 'researcher_notes', 'internal_notes', 'comment', 'comm
 def validate_study_meta(title: str, condition: str) -> Tuple[bool, str]:
     if not title or len(title.strip()) < 3:
         return False, "Study title must be at least 3 characters long."
-    valid_conditions = ["OPEN", "CLOSED", "HYBRID", "PROPOSED"]
+    valid_conditions = ["OPEN", "CLOSED", "HYBRID"]
     if condition not in valid_conditions:
         return False, f"Invalid study condition. Must be one of {valid_conditions}"
     return True, ""
@@ -35,22 +35,30 @@ def validate_card_csv(csv_input: Any) -> Tuple[bool, str, List[Dict[str, Any]]]:
         if not text:
             return False, "Unable to read file encoding. Please save CSV as UTF-8.", []
 
-        lines = text.splitlines()
-        cleaned_lines = []
-        for line in lines:
-            s = line.strip()
-            if s.startswith('"') and s.endswith('"') and s.count(',') >= 1:
-                s = s[1:-1]
-            cleaned_lines.append(s)
-        cleaned_text = "\n".join(cleaned_lines)
-
         try:
-            df = pd.read_csv(io.StringIO(cleaned_text), sep=None, engine='python')
+            # Parse the uploaded CSV exactly as supplied.  In particular, do
+            # not strip surrounding quotes line-by-line: quoted commas and
+            # multi-line descriptions are valid CSV and pandas handles them.
+            df = pd.read_csv(io.StringIO(text), sep=None, engine='python', dtype=str, keep_default_na=False)
         except Exception:
             try:
-                df = pd.read_csv(io.StringIO(cleaned_text))
+                df = pd.read_csv(io.StringIO(text), dtype=str, keep_default_na=False)
             except Exception as e:
                 return False, f"Failed to parse CSV file: {str(e)}", []
+
+        # A few spreadsheet exports wrap the entire CSV in one quoted field.
+        # Only unwrap that narrow case after a normal parse has produced one
+        # column whose header itself contains commas.
+        if len(df.columns) == 1 and "," in str(df.columns[0]):
+            wrapped = text.strip()
+            if wrapped.startswith('"') and wrapped.endswith('"'):
+                try:
+                    df = pd.read_csv(
+                        io.StringIO(wrapped[1:-1].replace('""', '"')),
+                        sep=None, engine='python', dtype=str, keep_default_na=False,
+                    )
+                except Exception:
+                    pass
     elif isinstance(csv_input, str):
         if not csv_input.strip():
             return False, "The provided CSV text is empty.", []

@@ -23,7 +23,7 @@ study_service = StudyService()
 participant_service = ParticipantService()
 
 def clear_participant_state():
-    for key in ["session_token", "categories", "placements", "completed_code"]:
+    for key in ["session_token", "categories", "placements", "category_descriptions", "completed_code"]:
         if key in st.session_state:
             del st.session_state[key]
 
@@ -36,8 +36,12 @@ if study_token:
     if not study:
         st.error("Invalid study token. Please check your participant link.")
     else:
-        # Initialize fresh session if not present
-        if "session_token" not in st.session_state:
+        # A browser can visit more than one participant link. Never reuse a
+        # session created for a different study, or its data could be saved
+        # under the wrong project.
+        current_session = participant_service.get_session(st.session_state.get("session_token", ""))
+        if not current_session or current_session["study_id"] != study.study_id:
+            clear_participant_state()
             sess = participant_service.create_fresh_session(study.study_id)
             st.session_state["session_token"] = sess["session_token"]
 
@@ -71,7 +75,13 @@ if study_token:
                         for item in items:
                             st.markdown(f"• {item}")
                             
-                if snapshot.get("reflection"):
+                reflections = snapshot.get("reflections", [])
+                if reflections:
+                    st.subheader("Your Reflections")
+                    for response in reflections:
+                        if response.get("response", "").strip():
+                            st.info(f"**{response.get('question', 'Reflection')}**\n\n{response['response']}")
+                elif snapshot.get("reflection"):
                     st.info(f"**Your Reflection:** {snapshot['reflection']}")
 
             st.markdown("---")
@@ -87,7 +97,9 @@ if study_token:
             if not cards:
                 st.warning("This study currently has no cards configured.")
             else:
-                render_card_sort_workspace(study, cards)
+                render_card_sort_workspace(
+                    study, cards, participant_service, st.session_state["session_token"]
+                )
                 
                 st.markdown("---")
                 st.subheader("Submit Your Card Organization")
@@ -95,20 +107,32 @@ if study_token:
                 unassigned_ids = st.session_state.get("placements", {}).get("Unassigned", [])
                 plural_lbl = pluralize_label(study.item_label)
 
-                reflection_q = study.reflection_questions[0] if study.reflection_questions else "Please briefly explain your sorting logic:"
-                reflection_input = st.text_area(f"💬 {reflection_q}", placeholder="Explain why you grouped these items together...", height=100)
+                reflection_questions = study.reflection_questions or ["Please briefly explain your sorting logic:"]
+                reflection_responses = []
+                for index, reflection_q in enumerate(reflection_questions):
+                    response = st.text_area(
+                        f"💬 {reflection_q}",
+                        placeholder="Explain why you grouped these items together...",
+                        height=100,
+                        key=f"reflection_{st.session_state['session_token']}_{index}",
+                    )
+                    reflection_responses.append({"question": reflection_q, "response": response})
 
                 if study.require_all_placed and len(unassigned_ids) > 0:
                     st.warning(f"⚠️ Please move the remaining **{len(unassigned_ids)} unassigned {plural_lbl.lower()}** into categories before submitting.")
                     st.button("Submit Card Sort", disabled=True, use_container_width=True)
                 else:
                     if st.button("🚀 Submit Final Card Sort", type="primary", use_container_width=True):
-                        code = participant_service.submit_sort(
-                            session_token=st.session_state["session_token"],
-                            study=study,
-                            cards=cards,
-                            placements=st.session_state["placements"],
-                            reflection_text=reflection_input
-                        )
-                        st.session_state["completed_code"] = code
-                        st.rerun()
+                        try:
+                            code = participant_service.submit_sort(
+                                session_token=st.session_state["session_token"],
+                                study=study,
+                                cards=cards,
+                                placements=st.session_state["placements"],
+                                reflection_responses=reflection_responses,
+                                category_descriptions=st.session_state.get("category_descriptions", {}),
+                            )
+                            st.session_state["completed_code"] = code
+                            st.rerun()
+                        except ValueError as error:
+                            st.error(str(error))

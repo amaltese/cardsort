@@ -54,6 +54,9 @@ class Card:
     researcher_notes: str = ""
     display_order: int = 0
     active: bool = True
+    color_fill: str = "#EFF6FF"
+    color_text: str = "#0F172A"
+    color_border: str = "#2563EB"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -65,6 +68,9 @@ class Card:
             "researcher_notes": self.researcher_notes,
             "display_order": self.display_order,
             "active": self.active,
+            "color_fill": self.color_fill,
+            "color_text": self.color_text,
+            "color_border": self.color_border,
         }
 
 @dataclass

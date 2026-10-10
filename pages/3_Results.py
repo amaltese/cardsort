@@ -48,7 +48,7 @@ if check_researcher_auth():
 
         if not completed_sessions:
             st.warning("⚠️ No submitted responses found for this study yet.")
-            st.info(f"Share this link with participants: `/2_Participant?st={selected_study.token}`")
+            st.info(f"Participant path: `/Participant?st={selected_study.token}`")
         else:
             tab1, tab2, tab3 = st.tabs([
                 "📊 Card Agreement & Co-Occurrence", 
@@ -60,7 +60,7 @@ if check_researcher_auth():
             with tab1:
                 st.subheader("Card Consensus & Agreement Analysis")
                 
-                df_agreement = analysis_service.get_card_agreement_summary(selected_study.study_id, card_titles)
+                df_agreement = analysis_service.get_card_agreement_summary(selected_study.study_id, cards)
                 st.dataframe(
                     df_agreement,
                     use_container_width=True,
@@ -79,7 +79,7 @@ if check_researcher_auth():
                 st.subheader("Pairwise Co-Occurrence Heatmap (%)")
                 st.caption("Shows how frequently pairs of cards were grouped into the same category across all teachers.")
 
-                df_co = analysis_service.get_co_occurrence_matrix(selected_study.study_id, card_titles)
+                df_co = analysis_service.get_co_occurrence_matrix(selected_study.study_id, cards)
                 if not df_co.empty:
                     try:
                         styled_co = df_co.style.background_gradient(cmap="Blues", axis=None).format("{:.0f}%")
@@ -93,7 +93,7 @@ if check_researcher_auth():
                 st.subheader("Card Assignment Breakdown by Category (%)")
                 st.caption("Percentage of total participants assigning each card to a given category name.")
 
-                df_freq = analysis_service.get_card_category_frequency(selected_study.study_id, card_titles)
+                df_freq = analysis_service.get_card_category_frequency(selected_study.study_id, cards)
                 if not df_freq.empty:
                     try:
                         styled_freq = df_freq.style.background_gradient(cmap="Greens", axis=None).format("{:.1f}%")
