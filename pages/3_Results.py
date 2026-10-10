@@ -26,19 +26,16 @@ if check_researcher_auth():
     if not studies:
         st.info("No studies have been created yet.")
     else:
-        # Study Selector Dropdown
         study_options = {f"{std.title} ({std.condition})": std for std in studies}
         selected_label = st.selectbox("Select Study to Analyze:", list(study_options.keys()))
         selected_study = study_options[selected_label]
 
         st.markdown("---")
         
-        # Fetch responses and card list
         completed_sessions = export_service.get_completed_sessions_for_study(selected_study.study_id)
         cards = study_service.card_repo.get_cards_for_study(selected_study.study_id, active_only=True)
         card_titles = [c.title for c in cards]
 
-        # Overview Metrics Bar
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Total Completed Submissions", len(completed_sessions))
@@ -53,7 +50,6 @@ if check_researcher_auth():
             st.warning("⚠️ No submitted responses found for this study yet.")
             st.info(f"Share this link with participants: `/2_Participant?st={selected_study.token}`")
         else:
-            # Multi-Tab Analytics Dashboard
             tab1, tab2, tab3 = st.tabs([
                 "📊 Card Agreement & Co-Occurrence", 
                 "📋 Category Frequency Matrix", 
@@ -85,8 +81,12 @@ if check_researcher_auth():
 
                 df_co = analysis_service.get_co_occurrence_matrix(selected_study.study_id, card_titles)
                 if not df_co.empty:
-                    styled_co = df_co.style.background_gradient(cmap="Blues", axis=None).format("{:.0f}%")
-                    st.dataframe(styled_co, use_container_width=True)
+                    try:
+                        styled_co = df_co.style.background_gradient(cmap="Blues", axis=None).format("{:.0f}%")
+                        st.dataframe(styled_co, use_container_width=True)
+                    except Exception:
+                        # Fallback if matplotlib is installing
+                        st.dataframe(df_co.applymap(lambda x: f"{x:.0f}%"), use_container_width=True)
 
             # Tab 2: Card-by-Category Cross-Tabulation
             with tab2:
@@ -95,8 +95,11 @@ if check_researcher_auth():
 
                 df_freq = analysis_service.get_card_category_frequency(selected_study.study_id, card_titles)
                 if not df_freq.empty:
-                    styled_freq = df_freq.style.background_gradient(cmap="Greens", axis=None).format("{:.1f}%")
-                    st.dataframe(styled_freq, use_container_width=True)
+                    try:
+                        styled_freq = df_freq.style.background_gradient(cmap="Greens", axis=None).format("{:.1f}%")
+                        st.dataframe(styled_freq, use_container_width=True)
+                    except Exception:
+                        st.dataframe(df_freq.applymap(lambda x: f"{x:.1f}%"), use_container_width=True)
                 else:
                     st.info("No category assignments available yet.")
 
