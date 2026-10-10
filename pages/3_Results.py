@@ -6,6 +6,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 import streamlit as st
+import numpy as np
 from database.db import init_db
 from services.study_service import StudyService
 from services.export_service import ExportService
@@ -77,16 +78,22 @@ if check_researcher_auth():
 
                 st.markdown("---")
                 st.subheader("Pairwise Co-Occurrence Heatmap (%)")
-                st.caption("Shows how frequently pairs of cards were grouped into the same category across all teachers.")
+                st.caption("Shows each unique card pair once. Blank cells are the self-comparisons and duplicated mirror values.")
 
                 df_co = analysis_service.get_co_occurrence_matrix(selected_study.study_id, cards)
                 if not df_co.empty:
+                    # The matrix is symmetric, so the upper half repeats the
+                    # lower half and the diagonal only compares a card with
+                    # itself. Hiding both makes pairwise patterns easier to scan.
+                    lower_triangle = df_co.mask(np.triu(np.ones(df_co.shape, dtype=bool)))
                     try:
-                        styled_co = df_co.style.background_gradient(cmap="Blues", axis=None).format("{:.0f}%")
+                        styled_co = lower_triangle.style.background_gradient(cmap="Blues", axis=None).format(
+                            lambda value: "" if np.isnan(value) else f"{value:.0f}%"
+                        )
                         st.dataframe(styled_co, use_container_width=True)
                     except Exception:
                         # Fallback if matplotlib is installing
-                        st.dataframe(df_co.applymap(lambda x: f"{x:.0f}%"), use_container_width=True)
+                        st.dataframe(lower_triangle.applymap(lambda x: "" if np.isnan(x) else f"{x:.0f}%"), use_container_width=True)
 
             # Tab 2: Card-by-Category Cross-Tabulation
             with tab2:
