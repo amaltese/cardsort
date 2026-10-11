@@ -28,7 +28,8 @@ class ExportService:
                 "started_at": str(r["started_at"]) if r["started_at"] else "",
                 "completed_at": str(r["completed_at"]) if r["completed_at"] else "",
                 "placements": snap.get("placements", {}),
-                "reflection": snap.get("reflection", "")
+                "reflection": snap.get("reflection", ""),
+                "voice_memo_url": snap.get("voice_memo_url", ""),
             })
         return results
 
@@ -47,10 +48,11 @@ class ExportService:
                         "completed_at": completed_at,
                         "category_name": cat_name,
                         "card_title": item_title,
-                        "participant_reflection": reflection
+                        "participant_reflection": reflection,
+                        "voice_memo_url": s["voice_memo_url"],
                     })
         if not rows:
-            df = pd.DataFrame(columns=["completion_code", "completed_at", "category_name", "card_title", "participant_reflection"])
+            df = pd.DataFrame(columns=["completion_code", "completed_at", "category_name", "card_title", "participant_reflection", "voice_memo_url"])
         else:
             df = pd.DataFrame(rows)
         return df.to_csv(index=False)

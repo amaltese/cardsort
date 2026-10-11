@@ -1,6 +1,9 @@
 import os
 import sqlite3
 from pathlib import Path
+from typing import Dict, List
+
+from services.google_storage import is_configured, load_state, save_state
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 configured_db_path = Path(os.getenv("DATABASE_PATH", "card_sort.db")).expanduser()
@@ -8,9 +11,67 @@ configured_db_path = Path(os.getenv("DATABASE_PATH", "card_sort.db")).expanduser
 # different working directory. An explicitly absolute DATABASE_PATH still wins.
 DB_PATH = str(configured_db_path if configured_db_path.is_absolute() else PROJECT_ROOT / configured_db_path)
 
+SYNC_TABLES = [
+    "studies", "cards", "categories", "participant_sessions",
+    "card_placements", "reflection_responses", "interaction_events",
+]
+_remote_state_loaded = False
+_sync_suspended = False
+
+
+def _is_primary_database(connection: sqlite3.Connection) -> bool:
+    """Do not send temporary test databases or alternate paths to Google."""
+    try:
+        database_file = next(row[2] for row in connection.execute("PRAGMA database_list") if row[1] == "main")
+        return Path(database_file).resolve() == Path(DB_PATH).resolve()
+    except (OSError, StopIteration):
+        return False
+
+
+def _export_state(connection: sqlite3.Connection) -> Dict[str, List[Dict[str, object]]]:
+    tables: Dict[str, List[Dict[str, object]]] = {}
+    for name in SYNC_TABLES:
+        rows = connection.execute(f"SELECT * FROM {name}").fetchall()
+        tables[name] = [dict(row) for row in rows]
+    return {"tables": tables}
+
+
+def _restore_state(connection: sqlite3.Connection, state: Dict[str, object]) -> None:
+    """Replace a blank local runtime database with its private Sheet snapshot."""
+    global _sync_suspended
+    tables = state.get("tables", {}) if isinstance(state, dict) else {}
+    if not any(tables.get(name) for name in SYNC_TABLES):
+        return
+
+    _sync_suspended = True
+    try:
+        for name in reversed(SYNC_TABLES):
+            connection.execute(f"DELETE FROM {name}")
+        for name in SYNC_TABLES:
+            rows = tables.get(name, [])
+            if not rows:
+                continue
+            columns = list(rows[0].keys())
+            column_list = ", ".join(columns)
+            placeholders = ", ".join("?" for _ in columns)
+            values = [tuple(row.get(column) for column in columns) for row in rows]
+            connection.executemany(f"INSERT INTO {name} ({column_list}) VALUES ({placeholders})", values)
+        sqlite3.Connection.commit(connection)
+    finally:
+        _sync_suspended = False
+
+
+class SyncedConnection(sqlite3.Connection):
+    """SQLite connection that mirrors successful commits to the private Sheet."""
+
+    def commit(self):
+        sqlite3.Connection.commit(self)
+        if _remote_state_loaded and not _sync_suspended and is_configured() and _is_primary_database(self):
+            save_state(_export_state(self))
+
 def get_connection(db_path=None):
     target_path = db_path or DB_PATH
-    conn = sqlite3.connect(target_path, check_same_thread=False)
+    conn = sqlite3.connect(target_path, check_same_thread=False, factory=SyncedConnection)
     conn.row_factory = sqlite3.Row
     # SQLite does not enforce declared foreign keys unless every connection
     # explicitly enables them.  This makes study deletion clean up its related
@@ -20,6 +81,7 @@ def get_connection(db_path=None):
     return conn
 
 def init_db(db_path=None):
+    global _remote_state_loaded
     conn = get_connection(db_path)
     cursor = conn.cursor()
     
@@ -147,5 +209,18 @@ def init_db(db_path=None):
     )
     ''')
 
-    conn.commit()
+    # Do not mirror schema creation before an existing remote snapshot is
+    # restored.  Otherwise a fresh Community Cloud container could overwrite
+    # the researcher's saved data with empty tables.
+    sqlite3.Connection.commit(conn)
+
+    if not db_path and not _remote_state_loaded and is_configured():
+        try:
+            _restore_state(conn, load_state() or {})
+        finally:
+            # A temporary network failure should not repeatedly download state
+            # during a single page render. A later app restart will retry.
+            _remote_state_loaded = True
+    elif not db_path:
+        _remote_state_loaded = True
     conn.close()

@@ -1,6 +1,6 @@
 # Asynchronous Virtual Card-Sorting Research Platform
 
-A modular web application built with Python 3.12 and Streamlit for designing, hosting, and analyzing virtual open, closed, hybrid, and proposed-organization card sorts.
+A modular web application built with Python 3.12 and Streamlit for designing, hosting, and analyzing virtual open, closed, and hybrid card sorts.
 
 ## Setup Instructions
 
@@ -23,3 +23,17 @@ A modular web application built with Python 3.12 and Streamlit for designing, ho
    ```bash
    streamlit run app.py
    ```
+
+## Private Google storage
+
+The deployed app can persist studies and required WAV voice memos through a
+researcher's private Google Sheet and Drive folder. The one-time script to
+deploy is in `google_apps_script.js`. Its URL and secret must be saved in
+Streamlit Community Cloud's **App settings → Secrets**, never in this
+repository:
+
+```toml
+[google_storage]
+apps_script_url = "https://script.google.com/macros/s/.../exec"
+apps_script_secret = "your-long-random-secret"
+```

@@ -132,6 +132,8 @@ if check_researcher_auth():
                     with st.expander(f"🎓 Submission #{len(completed_sessions) - idx} — Code: {code} ({completed_at})", expanded=(idx == 0)):
                         if refl:
                             st.info(f"💬 **Teacher Reflection:** {refl}")
+                        if sess.get("voice_memo_url"):
+                            st.link_button("Play private voice memo", sess["voice_memo_url"])
 
                         st.markdown("**Category Assignments:**")
                         

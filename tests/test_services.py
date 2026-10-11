@@ -91,7 +91,8 @@ class TestCardSortPlatform(unittest.TestCase):
         participant_service = ParticipantService(self.test_db)
         session = participant_service.create_fresh_session(study.study_id)
         participant_service.submit_sort(
-            session["session_token"], study, [first, second], {"Group": [first.card_id, second.card_id]}
+            session["session_token"], study, [first, second], {"Group": [first.card_id, second.card_id]},
+            voice_memo_url="https://drive.example.test/private-memo.wav",
         )
 
         matrix = AnalysisService(self.test_db).get_co_occurrence_matrix(study.study_id, [first, second])

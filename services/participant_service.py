@@ -56,7 +56,8 @@ class ParticipantService:
             conn.close()
 
     def _validate_submission(
-        self, session_token: str, study: Study, cards: List[Card], placements: Dict[str, List[str]]
+        self, session_token: str, study: Study, cards: List[Card], placements: Dict[str, List[str]],
+        voice_memo_url: Optional[str] = None,
     ) -> None:
         session = self.get_session(session_token)
         if not session or session["study_id"] != study.study_id:
@@ -85,6 +86,9 @@ class ParticipantService:
             if unexpected:
                 raise ValueError("This study uses predefined categories; new categories cannot be submitted.")
 
+        if not voice_memo_url:
+            raise ValueError("A recorded voice memo is required before this card sort can be submitted.")
+
     def submit_sort(
         self,
         session_token: str,
@@ -93,8 +97,9 @@ class ParticipantService:
         placements: Dict[str, List[str]],
         reflection_responses: Optional[List[Dict[str, str]]] = None,
         category_descriptions: Optional[Dict[str, str]] = None,
+        voice_memo_url: Optional[str] = None,
     ) -> str:
-        self._validate_submission(session_token, study, cards, placements)
+        self._validate_submission(session_token, study, cards, placements, voice_memo_url)
         completion_code = self.generate_completion_code()
         cards_by_id = {c.card_id: c.title for c in cards}
 
@@ -112,6 +117,7 @@ class ParticipantService:
             "placement_card_ids": placements,
             "category_descriptions": category_descriptions or {},
             "reflections": reflection_responses or [],
+            "voice_memo_url": voice_memo_url,
             # Kept for older exports and studies with one reflection question.
             "reflection": "\n\n".join(
                 response.get("response", "").strip()
@@ -137,12 +143,23 @@ class ParticipantService:
 
         for question_index, response in enumerate(reflection_responses or []):
             response_text = response.get("response", "").strip()
-            if response_text:
+            audio_file_path = response.get("audio_file_path") or voice_memo_url
+            if response_text or audio_file_path:
                 cursor.execute(
-                    """INSERT INTO reflection_responses (response_id, session_token, question_index, response_text)
-                       VALUES (?, ?, ?, ?)""",
-                    (f"rfl_{uuid.uuid4().hex[:12]}", session_token, question_index, response_text),
+                    """INSERT INTO reflection_responses (response_id, session_token, question_index, response_text, audio_file_path)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (
+                        f"rfl_{uuid.uuid4().hex[:12]}", session_token, question_index, response_text,
+                        audio_file_path,
+                    ),
                 )
+
+        if not reflection_responses:
+            cursor.execute(
+                """INSERT INTO reflection_responses (response_id, session_token, question_index, response_text, audio_file_path)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (f"rfl_{uuid.uuid4().hex[:12]}", session_token, 0, "", voice_memo_url),
+            )
 
         cursor.execute("""
         UPDATE participant_sessions

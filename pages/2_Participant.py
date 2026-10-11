@@ -10,6 +10,7 @@ import streamlit as st
 from database.db import init_db
 from services.study_service import StudyService
 from services.participant_service import ParticipantService
+from services.google_storage import upload_voice_memo
 from components.participant_header import render_participant_header
 from components.card_sort import render_card_sort_workspace, pluralize_label
 
@@ -107,32 +108,49 @@ if study_token:
                 unassigned_ids = st.session_state.get("placements", {}).get("Unassigned", [])
                 plural_lbl = pluralize_label(study.item_label)
 
-                reflection_questions = study.reflection_questions or ["Please briefly explain your sorting logic:"]
-                reflection_responses = []
-                for index, reflection_q in enumerate(reflection_questions):
-                    response = st.text_area(
-                        f"💬 {reflection_q}",
-                        placeholder="Explain why you grouped these items together...",
-                        height=100,
-                        key=f"reflection_{st.session_state['session_token']}_{index}",
-                    )
-                    reflection_responses.append({"question": reflection_q, "response": response})
+                reflection_questions = study.reflection_questions or ["Please explain your sorting logic."]
+                voice_prompt = " ".join(reflection_questions)
+                st.subheader("Required voice memo")
+                st.write(voice_prompt)
+                st.caption(
+                    "Record a short explanation of your organization. The private recording is saved for the research team and is required to finish."
+                )
+                recording = st.audio_input(
+                    "Record your explanation (maximum 5 MB, about two minutes)",
+                    sample_rate=16000,
+                    key=f"voice_memo_{st.session_state['session_token']}",
+                )
+                if recording:
+                    st.audio(recording)
 
                 if study.require_all_placed and len(unassigned_ids) > 0:
                     st.warning(f"⚠️ Please move the remaining **{len(unassigned_ids)} unassigned {plural_lbl.lower()}** into categories before submitting.")
                     st.button("Submit Card Sort", disabled=True, use_container_width=True)
                 else:
                     if st.button("🚀 Submit Final Card Sort", type="primary", use_container_width=True):
+                        if not recording:
+                            st.error("Please record your voice memo before submitting.")
+                            st.stop()
                         try:
-                            code = participant_service.submit_sort(
-                                session_token=st.session_state["session_token"],
-                                study=study,
-                                cards=cards,
-                                placements=st.session_state["placements"],
-                                reflection_responses=reflection_responses,
-                                category_descriptions=st.session_state.get("category_descriptions", {}),
-                            )
+                            with st.spinner("Saving your recording and card sort..."):
+                                voice_memo_url = upload_voice_memo(
+                                    recording.getvalue(), st.session_state["session_token"]
+                                )
+                                reflection_responses = [{
+                                    "question": voice_prompt,
+                                    "response": "",
+                                    "audio_file_path": voice_memo_url,
+                                }]
+                                code = participant_service.submit_sort(
+                                    session_token=st.session_state["session_token"],
+                                    study=study,
+                                    cards=cards,
+                                    placements=st.session_state["placements"],
+                                    reflection_responses=reflection_responses,
+                                    category_descriptions=st.session_state.get("category_descriptions", {}),
+                                    voice_memo_url=voice_memo_url,
+                                )
                             st.session_state["completed_code"] = code
                             st.rerun()
-                        except ValueError as error:
+                        except (ValueError, RuntimeError) as error:
                             st.error(str(error))
