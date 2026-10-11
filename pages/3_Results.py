@@ -7,6 +7,7 @@ if str(ROOT_DIR) not in sys.path:
 
 import streamlit as st
 import numpy as np
+import pandas as pd
 from database.db import init_db
 from services.study_service import StudyService
 from services.export_service import ExportService
@@ -36,6 +37,10 @@ if check_researcher_auth():
         completed_sessions = export_service.get_completed_sessions_for_study(selected_study.study_id)
         cards = study_service.card_repo.get_cards_for_study(selected_study.study_id, active_only=True)
         card_titles = [c.title for c in cards]
+        card_codes = {card.title: f"C{index + 1}" for index, card in enumerate(cards)}
+        card_key = pd.DataFrame(
+            [{"Card": card_codes[card.title], "Card text": card.title} for card in cards]
+        )
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -51,6 +56,15 @@ if check_researcher_auth():
             st.warning("⚠️ No submitted responses found for this study yet.")
             st.info(f"Participant path: `/Participant?st={selected_study.token}`")
         else:
+            with st.expander("Card key for the results tables", expanded=True):
+                st.caption("Long card text is shown once here. Results tables use compact card codes so they remain readable.")
+                st.dataframe(
+                    card_key,
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={"Card text": st.column_config.TextColumn("Card text", width="large")},
+                )
+
             tab1, tab2, tab3 = st.tabs([
                 "📊 Card Agreement & Co-Occurrence", 
                 "📋 Category Frequency Matrix", 
@@ -62,6 +76,9 @@ if check_researcher_auth():
                 st.subheader("Card Consensus & Agreement Analysis")
                 
                 df_agreement = analysis_service.get_card_agreement_summary(selected_study.study_id, cards)
+                if not df_agreement.empty:
+                    df_agreement.insert(0, "Card", df_agreement["Card Title"].map(card_codes))
+                    df_agreement = df_agreement.drop(columns=["Card Title"])
                 st.dataframe(
                     df_agreement,
                     use_container_width=True,
@@ -78,10 +95,11 @@ if check_researcher_auth():
 
                 st.markdown("---")
                 st.subheader("Pairwise Co-Occurrence Heatmap (%)")
-                st.caption("Shows each unique card pair once. Blank cells are the self-comparisons and duplicated mirror values.")
+                st.caption("Shows each unique card pair once. Use the card key above to match compact labels such as C1 to the full card text.")
 
                 df_co = analysis_service.get_co_occurrence_matrix(selected_study.study_id, cards)
                 if not df_co.empty:
+                    df_co = df_co.rename(index=card_codes, columns=card_codes)
                     # The matrix is symmetric, so the upper half repeats the
                     # lower half and the diagonal only compares a card with
                     # itself. Hiding both makes pairwise patterns easier to scan.
@@ -102,6 +120,7 @@ if check_researcher_auth():
 
                 df_freq = analysis_service.get_card_category_frequency(selected_study.study_id, cards)
                 if not df_freq.empty:
+                    df_freq = df_freq.rename(index=card_codes)
                     try:
                         styled_freq = df_freq.style.background_gradient(cmap="Greens", axis=None).format("{:.1f}%")
                         st.dataframe(styled_freq, use_container_width=True)
