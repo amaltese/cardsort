@@ -1,5 +1,6 @@
 import streamlit as st
 import html
+import random
 import re
 from typing import List, Dict
 from database.models import Study, Card
@@ -89,7 +90,12 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
         category_styles[category.name] = style
 
     if "categories" not in st.session_state or not st.session_state["categories"]:
-        st.session_state["categories"] = db_categories.copy()
+        presented_categories = db_categories.copy()
+        if study.category_order == "RANDOM":
+            # Keep the order stable within one participant's session, but vary
+            # it across participants to avoid a display-order effect.
+            random.Random(f"{study.study_id}:{session_token}").shuffle(presented_categories)
+        st.session_state["categories"] = presented_categories
     if "category_descriptions" not in st.session_state:
         st.session_state["category_descriptions"] = {
             category.name: category.description for category in db_category_objects
@@ -119,9 +125,17 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
 
     cards_by_id = {c.card_id: c for c in cards}
 
+    st.markdown("### 1. Categories")
+    if study.condition == "CLOSED":
+        st.caption("The research team provided fixed categories. You can review them below while you sort.")
+    elif study.condition == "HYBRID":
+        st.caption("Start with the provided categories, or add your own if one would better fit your organization.")
+    else:
+        st.caption("Create the categories that best represent how you would organize these items.")
+
     # Category Creation Header
     if study.allow_new_categories:
-        with st.expander("➕ Create New Category", expanded=(len(st.session_state["categories"]) == 0)):
+        with st.expander("Add a category", expanded=(len(st.session_state["categories"]) == 0)):
             c_input, c_btn = st.columns([3, 1])
             with c_input:
                 new_cat_name = st.text_input("Category Name", key="new_cat_input", label_visibility="collapsed", placeholder="Enter new category name...")
@@ -129,15 +143,31 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
                 if st.button("Add Category", type="primary", use_container_width=True):
                     clean_name = new_cat_name.strip()
                     if clean_name and clean_name not in st.session_state["categories"] and clean_name != "Unassigned":
+                        placed_card_count = sum(
+                            len(card_ids)
+                            for category, card_ids in st.session_state["placements"].items()
+                            if category != "Unassigned"
+                        )
                         st.session_state["categories"].append(clean_name)
                         st.session_state["placements"][clean_name] = []
                         st.session_state["category_descriptions"][clean_name] = ""
+                        if placed_card_count:
+                            st.session_state["category_review_notice"] = (
+                                f"You added “{clean_name}” after placing {placed_card_count} item"
+                                f"{'s' if placed_card_count != 1 else ''}. Review your existing categories in case any items belong here."
+                            )
                         if participant_service:
                             participant_service.record_interaction(
                                 session_token, study, "category_created", {"category": clean_name}
                             )
                         st.success(f"Added category '{clean_name}'")
                         st.rerun()
+
+    if st.session_state.get("category_review_notice"):
+        st.warning(st.session_state["category_review_notice"])
+        if st.button("I have reviewed my categories", key="dismiss_category_review_notice"):
+            st.session_state.pop("category_review_notice", None)
+            st.rerun()
 
     st.markdown("---")
 
@@ -149,7 +179,8 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
     deck_col = st.container()
 
     with deck_col:
-        st.markdown(f"### 🎴 Unassigned Deck ({len(unassigned_ids)} {plural_label})")
+        st.markdown(f"### 2. Sort the unassigned deck ({len(unassigned_ids)} {plural_label})")
+        st.caption("For each item, choose the category that fits best. You can unassign an item later if you change your mind.")
         
         if not unassigned_ids:
             st.success(f"🎉 All {plural_label.lower()} have been placed into categories!")
@@ -247,7 +278,8 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
     board_col = st.container()
     with board_col:
         if active_categories:
-            st.markdown(f"### 📂 Category Buckets ({len(active_categories)})")
+            st.markdown(f"### 3. Review your categories ({len(active_categories)})")
+            st.caption("Review items already placed in each category. You can rename, describe, or remove categories when your study allows it.")
             
             num_cols = min(len(active_categories), 3)
             cat_columns = st.columns(num_cols)

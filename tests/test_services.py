@@ -30,6 +30,7 @@ class TestCardSortPlatform(unittest.TestCase):
         )
         self.assertTrue(ok)
         self.assertIsNotNone(study)
+        self.assertEqual(study.category_order, "RANDOM")
         
         card = self.study_service.add_card_to_study(
             study.study_id,
@@ -40,6 +41,14 @@ class TestCardSortPlatform(unittest.TestCase):
         
         fetched_cards = self.study_service.card_repo.get_cards_for_study(study.study_id)
         self.assertEqual(len(fetched_cards), 1)
+
+    def test_researcher_can_preserve_category_order(self):
+        ok, message, study = self.study_service.create_study(
+            "Ordered Categories", "", "", "", "CLOSED", category_order="RESEARCHER"
+        )
+        self.assertTrue(ok, message)
+        restored = self.study_service.get_study(study.study_id)
+        self.assertEqual(restored.category_order, "RESEARCHER")
 
     def test_sort_service_movement(self):
         placements = {"Unassigned": ["crd_1", "crd_2"], "Group A": []}

@@ -18,6 +18,7 @@ class Study:
     allow_unassigned: bool = True
     require_all_placed: bool = True
     log_interactions: bool = True
+    category_order: str = "RANDOM"
     reflection_questions: List[str] = field(default_factory=list)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -39,6 +40,7 @@ class Study:
             "allow_unassigned": self.allow_unassigned,
             "require_all_placed": self.require_all_placed,
             "log_interactions": self.log_interactions,
+            "category_order": self.category_order,
             "reflection_questions": self.reflection_questions,
             "created_at": self.created_at,
             "updated_at": self.updated_at,

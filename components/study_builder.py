@@ -3,6 +3,10 @@ from services.study_service import StudyService
 
 
 CONDITIONS = ["OPEN", "CLOSED", "HYBRID"]
+CATEGORY_ORDER_OPTIONS = {
+    "Randomize for each participant (recommended)": "RANDOM",
+    "Use the researcher's category order": "RESEARCHER",
+}
 
 CONDITION_EXPLANATIONS = {
     "OPEN": "Participants create all categories themselves. Do not add starting categories for this type of study.",
@@ -93,6 +97,13 @@ def render_study_builder(study_service: StudyService):
         )
 
     _sort_type_intro(condition)
+    category_order_label = st.radio(
+        "Starting category order",
+        list(CATEGORY_ORDER_OPTIONS),
+        horizontal=True,
+        help="Randomizing starting categories prevents their display order from influencing a participant's choices. Categories participants create themselves are added after the starting categories.",
+        key="new_study_category_order",
+    )
     st.markdown("##### Optional Settings")
     allow_descriptions, allow_unassigned, require_all, log_interactions = _optional_settings("new_study")
     questions_text = st.text_area(
@@ -108,7 +119,8 @@ def render_study_builder(study_service: StudyService):
             allow_new_categories=permissions["allow_new"], allow_rename_categories=permissions["allow_rename"],
             allow_delete_categories=permissions["allow_delete"], allow_category_descriptions=allow_descriptions,
             allow_unassigned=allow_unassigned, require_all_placed=require_all,
-            log_interactions=log_interactions, reflection_questions=_questions_from_text(questions_text),
+            log_interactions=log_interactions, category_order=CATEGORY_ORDER_OPTIONS[category_order_label],
+            reflection_questions=_questions_from_text(questions_text),
         )
         if success:
             st.session_state["active_study_id"] = study.study_id
@@ -134,6 +146,18 @@ def render_study_settings(study, study_service: StudyService):
         key=f"settings_item_label_{study.study_id}",
     )
     _sort_type_intro(condition)
+    current_order_label = next(
+        (label for label, value in CATEGORY_ORDER_OPTIONS.items() if value == study.category_order),
+        "Randomize for each participant (recommended)",
+    )
+    category_order_label = st.radio(
+        "Starting category order",
+        list(CATEGORY_ORDER_OPTIONS),
+        index=list(CATEGORY_ORDER_OPTIONS).index(current_order_label),
+        horizontal=True,
+        help="Randomizing starting categories prevents display order from influencing a participant's choices.",
+        key=f"settings_category_order_{study.study_id}",
+    )
     st.caption("Card colors are set in Cards / Items; category colors are set in Starting Categories.")
     st.markdown("##### Optional Settings")
     allow_descriptions, allow_unassigned, require_all, log_interactions = _optional_settings(
@@ -165,6 +189,7 @@ def render_study_settings(study, study_service: StudyService):
         study.allow_unassigned = allow_unassigned
         study.require_all_placed = require_all
         study.log_interactions = log_interactions
+        study.category_order = CATEGORY_ORDER_OPTIONS[category_order_label]
         study.reflection_questions = _questions_from_text(questions_text)
         success, message = study_service.update_study(study)
         if success:

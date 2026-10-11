@@ -1,7 +1,7 @@
 import json
 import sqlite3
 from typing import List, Optional
-from database.db import get_connection
+from database.db import get_connection, sync_database
 from database.models import Study, Card, Category, ParticipantSession, CardPlacement
 
 class StudyRepository:
@@ -16,8 +16,8 @@ class StudyRepository:
             study_id, token, title, description, instructions, researcher_info,
             condition, item_label, allow_new_categories, allow_rename_categories,
             allow_delete_categories, allow_category_descriptions, allow_unassigned,
-            require_all_placed, log_interactions, reflection_questions_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            require_all_placed, log_interactions, category_order, reflection_questions_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(study_id) DO UPDATE SET
             title=excluded.title, description=excluded.description,
             instructions=excluded.instructions, researcher_info=excluded.researcher_info,
@@ -29,6 +29,7 @@ class StudyRepository:
             allow_unassigned=excluded.allow_unassigned,
             require_all_placed=excluded.require_all_placed,
             log_interactions=excluded.log_interactions,
+            category_order=excluded.category_order,
             reflection_questions_json=excluded.reflection_questions_json,
             updated_at=CURRENT_TIMESTAMP
         """, (
@@ -37,10 +38,11 @@ class StudyRepository:
             study.item_label, int(study.allow_new_categories), int(study.allow_rename_categories),
             int(study.allow_delete_categories), int(study.allow_category_descriptions),
             int(study.allow_unassigned), int(study.require_all_placed),
-            int(study.log_interactions), json.dumps(study.reflection_questions)
+            int(study.log_interactions), study.category_order, json.dumps(study.reflection_questions)
         ))
         conn.commit()
         conn.close()
+        sync_database(self.db_path)
 
     def get_study_by_id(self, study_id: str) -> Optional[Study]:
         conn = get_connection(self.db_path)
@@ -73,6 +75,7 @@ class StudyRepository:
             conn.commit()
         finally:
             conn.close()
+        sync_database(self.db_path)
 
     def _map_study(self, row: sqlite3.Row) -> Study:
         return Study(
@@ -91,6 +94,7 @@ class StudyRepository:
             allow_unassigned=bool(row["allow_unassigned"]),
             require_all_placed=bool(row["require_all_placed"]),
             log_interactions=bool(row["log_interactions"]),
+            category_order=row["category_order"] or "RANDOM",
             reflection_questions=json.loads(row["reflection_questions_json"] or "[]"),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"])
@@ -116,6 +120,7 @@ class CardRepository:
             """, (card.card_id, card.study_id, card.title, card.description, card.example, card.researcher_notes, card.display_order, int(card.active), card.color_fill, card.color_text, card.color_border))
         conn.commit()
         conn.close()
+        sync_database(self.db_path)
 
     def delete_card(self, card_id: str) -> None:
         conn = get_connection(self.db_path)
@@ -123,6 +128,7 @@ class CardRepository:
         cursor.execute("DELETE FROM cards WHERE card_id = ?", (card_id,))
         conn.commit()
         conn.close()
+        sync_database(self.db_path)
 
     def get_cards_for_study(self, study_id: str, active_only: bool = True) -> List[Card]:
         conn = get_connection(self.db_path)
@@ -159,6 +165,7 @@ class CategoryRepository:
             """, (cat.category_id, cat.study_id, cat.name, cat.description, cat.display_order, cat.color_fill, cat.color_text, cat.color_border))
         conn.commit()
         conn.close()
+        sync_database(self.db_path)
 
     def delete_category(self, category_id: str) -> None:
         conn = get_connection(self.db_path)
@@ -166,6 +173,7 @@ class CategoryRepository:
         cursor.execute("DELETE FROM categories WHERE category_id = ?", (category_id,))
         conn.commit()
         conn.close()
+        sync_database(self.db_path)
 
     def get_categories_for_study(self, study_id: str) -> List[Category]:
         conn = get_connection(self.db_path)

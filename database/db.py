@@ -62,12 +62,27 @@ def _restore_state(connection: sqlite3.Connection, state: Dict[str, object]) -> 
 
 
 class SyncedConnection(sqlite3.Connection):
-    """SQLite connection that mirrors successful commits to the private Sheet."""
+    """Normal local SQLite connection used by the app during an interaction."""
 
     def commit(self):
         sqlite3.Connection.commit(self)
-        if _remote_state_loaded and not _sync_suspended and is_configured() and _is_primary_database(self):
-            save_state(_export_state(self))
+
+
+def sync_database(db_path=None) -> None:
+    """Persist the complete local state at deliberate, meaningful save points.
+
+    Syncing every card movement made the participant experience wait for a
+    network round trip.  Interaction events remain local until the completed
+    sort is saved, while study edits and submissions call this function.
+    """
+    if db_path or not _remote_state_loaded or not is_configured():
+        return
+    conn = get_connection()
+    try:
+        if _is_primary_database(conn):
+            save_state(_export_state(conn))
+    finally:
+        conn.close()
 
 def get_connection(db_path=None):
     target_path = db_path or DB_PATH
@@ -103,6 +118,7 @@ def init_db(db_path=None):
         allow_unassigned INTEGER DEFAULT 1,
         require_all_placed INTEGER DEFAULT 1,
         log_interactions INTEGER DEFAULT 1,
+        category_order TEXT DEFAULT 'RANDOM',
         reflection_questions_json TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -111,6 +127,9 @@ def init_db(db_path=None):
     # “Proposed” was an early label that is no longer offered. Existing data
     # is equivalent to a closed sort, so migrate it on startup.
     cursor.execute("UPDATE studies SET condition = 'CLOSED' WHERE condition = 'PROPOSED'")
+    study_columns = {row["name"] for row in cursor.execute("PRAGMA table_info(studies)")}
+    if "category_order" not in study_columns:
+        cursor.execute("ALTER TABLE studies ADD COLUMN category_order TEXT DEFAULT 'RANDOM'")
 
     # Cards table
     cursor.execute('''

@@ -24,7 +24,7 @@ study_service = StudyService()
 participant_service = ParticipantService()
 
 def clear_participant_state():
-    for key in ["session_token", "categories", "placements", "category_descriptions", "completed_code"]:
+    for key in ["session_token", "categories", "placements", "category_descriptions", "category_review_notice", "completed_code"]:
         if key in st.session_state:
             del st.session_state[key]
 
@@ -76,14 +76,18 @@ if study_token:
                         for item in items:
                             st.markdown(f"• {item}")
                             
-                reflections = snapshot.get("reflections", [])
+                reflections = [
+                    response for response in snapshot.get("reflections", [])
+                    if response.get("response", "").strip()
+                ]
                 if reflections:
                     st.subheader("Your Reflections")
                     for response in reflections:
-                        if response.get("response", "").strip():
-                            st.info(f"**{response.get('question', 'Reflection')}**\n\n{response['response']}")
+                        st.info(f"**{response.get('question', 'Reflection')}**\n\n{response['response']}")
                 elif snapshot.get("reflection"):
                     st.info(f"**Your Reflection:** {snapshot['reflection']}")
+                if snapshot.get("voice_memo_url"):
+                    st.success("Your voice memo was saved with this submission.")
 
             st.markdown("---")
             if st.button("🔄 Start New Submission (Testing)", type="secondary"):

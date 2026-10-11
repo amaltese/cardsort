@@ -28,6 +28,7 @@ class StudyService:
         allow_unassigned: bool = True,
         require_all_placed: bool = True,
         log_interactions: bool = True,
+        category_order: str = "RANDOM",
         reflection_questions: Optional[List[str]] = None
     ) -> Tuple[bool, str, Optional[Study]]:
         is_valid, err = validate_study_meta(title, condition)
@@ -52,6 +53,7 @@ class StudyService:
             allow_unassigned=allow_unassigned,
             require_all_placed=require_all_placed,
             log_interactions=log_interactions,
+            category_order=category_order,
             reflection_questions=reflection_questions or ["Please explain your sorting logic."]
         )
         self.study_repo.save_study(study)

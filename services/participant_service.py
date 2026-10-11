@@ -4,7 +4,7 @@ import secrets
 from typing import Optional, Dict, Any, List
 from database.models import ParticipantSession, Study, Card
 from database.repositories import StudyRepository, CategoryRepository
-from database.db import get_connection
+from database.db import get_connection, sync_database
 
 class ParticipantService:
     def __init__(self, db_path: Optional[str] = None):
@@ -179,4 +179,8 @@ class ParticipantService:
 
         conn.commit()
         conn.close()
+        # The complete sort (including locally buffered interaction events) is
+        # the meaningful participant save point. Avoid a network wait after
+        # each individual card movement.
+        sync_database(self.db_path)
         return completion_code
