@@ -50,6 +50,14 @@ class TestCardSortPlatform(unittest.TestCase):
         restored = self.study_service.get_study(study.study_id)
         self.assertEqual(restored.category_order, "RESEARCHER")
 
+    def test_researcher_can_choose_participant_layout(self):
+        ok, message, study = self.study_service.create_study(
+            "Focused Layout", "", "", "", "CLOSED", participant_layout="FOCUSED"
+        )
+        self.assertTrue(ok, message)
+        restored = self.study_service.get_study(study.study_id)
+        self.assertEqual(restored.participant_layout, "FOCUSED")
+
     def test_sort_service_movement(self):
         placements = {"Unassigned": ["crd_1", "crd_2"], "Group A": []}
         updated = SortService.move_card(placements, "crd_1", "Group A")

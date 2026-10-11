@@ -11,7 +11,7 @@ const AUDIO_FOLDER_ID = 'PASTE_YOUR_AUDIO_RECORDINGS_FOLDER_ID_HERE';
 const API_SECRET = 'PASTE_A_LONG_RANDOM_SECRET_HERE';
 
 const TABLES = {
-  studies: ['study_id', 'token', 'title', 'description', 'instructions', 'researcher_info', 'condition', 'item_label', 'allow_new_categories', 'allow_rename_categories', 'allow_delete_categories', 'allow_category_descriptions', 'allow_unassigned', 'require_all_placed', 'log_interactions', 'category_order', 'reflection_questions_json', 'created_at', 'updated_at'],
+  studies: ['study_id', 'token', 'title', 'description', 'instructions', 'researcher_info', 'condition', 'item_label', 'allow_new_categories', 'allow_rename_categories', 'allow_delete_categories', 'allow_category_descriptions', 'allow_unassigned', 'require_all_placed', 'log_interactions', 'category_order', 'participant_layout', 'reflection_questions_json', 'created_at', 'updated_at'],
   cards: ['card_id', 'study_id', 'title', 'description', 'example', 'researcher_notes', 'display_order', 'active', 'color_fill', 'color_text', 'color_border'],
   categories: ['category_id', 'study_id', 'name', 'description', 'display_order', 'color_fill', 'color_text', 'color_border'],
   participant_sessions: ['session_token', 'study_id', 'status', 'completion_code', 'started_at', 'completed_at', 'snapshot_json'],

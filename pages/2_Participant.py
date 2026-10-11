@@ -96,7 +96,12 @@ if study_token:
 
         else:
             # Active Sort View
-            render_participant_header(study)
+            starting_categories = (
+                study_service.cat_repo.get_categories_for_study(study.study_id)
+                if study.condition in {"CLOSED", "HYBRID"}
+                else []
+            )
+            render_participant_header(study, starting_categories)
             cards = study_service.card_repo.get_cards_for_study(study.study_id, active_only=True)
             
             if not cards:
@@ -116,8 +121,10 @@ if study_token:
                 voice_prompt = " ".join(reflection_questions)
                 st.subheader("Required voice memo")
                 st.write(voice_prompt)
-                st.caption(
-                    "Record a short explanation of your organization. The private recording is saved for the research team and is required to finish."
+                st.info(
+                    "**How to finish your recording:** 1. Press **Record**. 2. Speak your explanation. "
+                    "3. Press **Stop**. Your recording is complete only when the playback preview appears below. "
+                    "You may re-record before submitting."
                 )
                 recording = st.audio_input(
                     "Record your explanation (maximum 5 MB, about two minutes)",

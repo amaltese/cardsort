@@ -7,6 +7,11 @@ CATEGORY_ORDER_OPTIONS = {
     "Randomize for each participant (recommended)": "RANDOM",
     "Use the researcher's category order": "RESEARCHER",
 }
+PARTICIPANT_LAYOUT_OPTIONS = {
+    "Standard deck and category review": "STANDARD",
+    "Focused carousel (one large card at a time)": "FOCUSED",
+    "Board-style click-to-move (experimental)": "BOARD",
+}
 
 CONDITION_EXPLANATIONS = {
     "OPEN": "Participants create all categories themselves. Do not add starting categories for this type of study.",
@@ -104,6 +109,12 @@ def render_study_builder(study_service: StudyService):
         help="Randomizing starting categories prevents their display order from influencing a participant's choices. Categories participants create themselves are added after the starting categories.",
         key="new_study_category_order",
     )
+    layout_label = st.selectbox(
+        "Participant sorting layout",
+        list(PARTICIPANT_LAYOUT_OPTIONS),
+        help="The standard deck is the existing interface. The focused and board-style options show one item at a time; participants can still review and change placed items below.",
+        key="new_study_participant_layout",
+    )
     st.markdown("##### Optional Settings")
     allow_descriptions, allow_unassigned, require_all, log_interactions = _optional_settings("new_study")
     questions_text = st.text_area(
@@ -120,6 +131,7 @@ def render_study_builder(study_service: StudyService):
             allow_delete_categories=permissions["allow_delete"], allow_category_descriptions=allow_descriptions,
             allow_unassigned=allow_unassigned, require_all_placed=require_all,
             log_interactions=log_interactions, category_order=CATEGORY_ORDER_OPTIONS[category_order_label],
+            participant_layout=PARTICIPANT_LAYOUT_OPTIONS[layout_label],
             reflection_questions=_questions_from_text(questions_text),
         )
         if success:
@@ -158,6 +170,17 @@ def render_study_settings(study, study_service: StudyService):
         help="Randomizing starting categories prevents display order from influencing a participant's choices.",
         key=f"settings_category_order_{study.study_id}",
     )
+    current_layout_label = next(
+        (label for label, value in PARTICIPANT_LAYOUT_OPTIONS.items() if value == study.participant_layout),
+        "Standard deck and category review",
+    )
+    layout_label = st.selectbox(
+        "Participant sorting layout",
+        list(PARTICIPANT_LAYOUT_OPTIONS),
+        index=list(PARTICIPANT_LAYOUT_OPTIONS).index(current_layout_label),
+        help="Participants can always review and change placed items below the active sorting area.",
+        key=f"settings_layout_{study.study_id}",
+    )
     st.caption("Card colors are set in Cards / Items; category colors are set in Starting Categories.")
     st.markdown("##### Optional Settings")
     allow_descriptions, allow_unassigned, require_all, log_interactions = _optional_settings(
@@ -190,6 +213,7 @@ def render_study_settings(study, study_service: StudyService):
         study.require_all_placed = require_all
         study.log_interactions = log_interactions
         study.category_order = CATEGORY_ORDER_OPTIONS[category_order_label]
+        study.participant_layout = PARTICIPANT_LAYOUT_OPTIONS[layout_label]
         study.reflection_questions = _questions_from_text(questions_text)
         success, message = study_service.update_study(study)
         if success:

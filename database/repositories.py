@@ -16,8 +16,8 @@ class StudyRepository:
             study_id, token, title, description, instructions, researcher_info,
             condition, item_label, allow_new_categories, allow_rename_categories,
             allow_delete_categories, allow_category_descriptions, allow_unassigned,
-            require_all_placed, log_interactions, category_order, reflection_questions_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            require_all_placed, log_interactions, category_order, participant_layout, reflection_questions_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(study_id) DO UPDATE SET
             title=excluded.title, description=excluded.description,
             instructions=excluded.instructions, researcher_info=excluded.researcher_info,
@@ -30,6 +30,7 @@ class StudyRepository:
             require_all_placed=excluded.require_all_placed,
             log_interactions=excluded.log_interactions,
             category_order=excluded.category_order,
+            participant_layout=excluded.participant_layout,
             reflection_questions_json=excluded.reflection_questions_json,
             updated_at=CURRENT_TIMESTAMP
         """, (
@@ -38,7 +39,8 @@ class StudyRepository:
             study.item_label, int(study.allow_new_categories), int(study.allow_rename_categories),
             int(study.allow_delete_categories), int(study.allow_category_descriptions),
             int(study.allow_unassigned), int(study.require_all_placed),
-            int(study.log_interactions), study.category_order, json.dumps(study.reflection_questions)
+            int(study.log_interactions), study.category_order, study.participant_layout,
+            json.dumps(study.reflection_questions)
         ))
         conn.commit()
         conn.close()
@@ -95,6 +97,7 @@ class StudyRepository:
             require_all_placed=bool(row["require_all_placed"]),
             log_interactions=bool(row["log_interactions"]),
             category_order=row["category_order"] or "RANDOM",
+            participant_layout=row["participant_layout"] or "STANDARD",
             reflection_questions=json.loads(row["reflection_questions_json"] or "[]"),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"])

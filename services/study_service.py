@@ -29,6 +29,7 @@ class StudyService:
         require_all_placed: bool = True,
         log_interactions: bool = True,
         category_order: str = "RANDOM",
+        participant_layout: str = "STANDARD",
         reflection_questions: Optional[List[str]] = None
     ) -> Tuple[bool, str, Optional[Study]]:
         is_valid, err = validate_study_meta(title, condition)
@@ -54,6 +55,7 @@ class StudyService:
             require_all_placed=require_all_placed,
             log_interactions=log_interactions,
             category_order=category_order,
+            participant_layout=participant_layout,
             reflection_questions=reflection_questions or ["Please explain your sorting logic."]
         )
         self.study_repo.save_study(study)

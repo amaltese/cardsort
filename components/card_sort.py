@@ -18,6 +18,118 @@ def _safe_color(value: str, fallback: str) -> str:
     return value if re.fullmatch(r"#[0-9a-fA-F]{6}", value or "") else fallback
 
 
+def _move_card(placements, card_id, category_name, participant_service, session_token, study):
+    st.session_state["placements"] = SortService.move_card(placements, card_id, category_name)
+    if participant_service:
+        participant_service.record_interaction(
+            session_token, study, "card_moved", {"card_id": card_id, "category": category_name}
+        )
+
+
+def _render_large_card(card: Card):
+    card_fill = _safe_color(card.color_fill, "#EFF6FF")
+    if card_fill == "#FFFFFF":
+        card_fill = "#EFF6FF"
+    card_text = _safe_color(card.color_text, "#0F172A")
+    card_border = _safe_color(card.color_border, "#2563EB")
+    st.markdown(
+        f"""
+        <div style="background:{card_fill}; color:{card_text}; border:3px solid {card_border}; border-radius:16px;
+                    padding:32px; margin:14px auto 20px; max-width:900px; box-shadow:0 5px 14px rgba(15, 23, 42, .10);">
+            <div style="font-size:24px; font-weight:700; line-height:1.4;">{html.escape(card.title)}</div>
+            {f'<div style="font-size:16px; line-height:1.5; margin-top:14px;">{html.escape(card.description)}</div>' if card.description else ''}
+            {f'<div style="font-size:14px; font-style:italic; margin-top:14px;">Example: {html.escape(card.example)}</div>' if card.example else ''}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _focused_card_id(unassigned_ids: List[str], session_token: str) -> str:
+    focus_key = f"focused_card_{session_token}"
+    if st.session_state.get(focus_key) not in unassigned_ids:
+        st.session_state[focus_key] = unassigned_ids[0]
+    return st.session_state[focus_key]
+
+
+def _render_focused_carousel(cards_by_id, unassigned_ids, active_categories, study, participant_service, session_token):
+    st.markdown(f"### 2. Focused sorter ({len(unassigned_ids)} remaining)")
+    st.caption("Review one item at a time, then choose the category that fits it best. You can revisit placed items below.")
+    if not unassigned_ids:
+        st.success("All items have been placed. Review your categories below before submitting.")
+        return
+    if not active_categories:
+        st.info("Create a category above before you start sorting.")
+        return
+
+    card_id = _focused_card_id(unassigned_ids, session_token)
+    card_index = unassigned_ids.index(card_id)
+    previous, position, following = st.columns([1, 4, 1])
+    with previous:
+        if st.button("← Previous", disabled=len(unassigned_ids) == 1, key="focused_previous"):
+            st.session_state[f"focused_card_{session_token}"] = unassigned_ids[(card_index - 1) % len(unassigned_ids)]
+            st.rerun()
+    with position:
+        st.markdown(f"<div style='text-align:center; padding-top:8px; font-weight:600;'>Item {card_index + 1} of {len(unassigned_ids)} remaining</div>", unsafe_allow_html=True)
+    with following:
+        if st.button("Next →", disabled=len(unassigned_ids) == 1, key="focused_next"):
+            st.session_state[f"focused_card_{session_token}"] = unassigned_ids[(card_index + 1) % len(unassigned_ids)]
+            st.rerun()
+
+    card = cards_by_id[card_id]
+    _render_large_card(card)
+    st.markdown("##### Choose a category")
+    columns = st.columns(min(len(active_categories), 3))
+    for index, category in enumerate(active_categories):
+        with columns[index % len(columns)]:
+            if st.button(category, key=f"focused_move_{card_id}_{category}", use_container_width=True, type="primary"):
+                _move_card(st.session_state["placements"], card_id, category, participant_service, session_token, study)
+                remaining = st.session_state["placements"]["Unassigned"]
+                if remaining:
+                    st.session_state[f"focused_card_{session_token}"] = remaining[min(card_index, len(remaining) - 1)]
+                st.rerun()
+
+
+def _render_board_sorter(cards_by_id, unassigned_ids, active_categories, category_styles, default_category_style, study, participant_service, session_token):
+    st.markdown(f"### 2. Board-style sorter ({len(unassigned_ids)} remaining)")
+    st.caption("Choose an item, then click the category bin where it belongs. This is a board-style alternative to drag-and-drop; review the full bins below.")
+    if not unassigned_ids:
+        st.success("All items have been placed. Review your categories below before submitting.")
+        return
+    if not active_categories:
+        st.info("Create a category above before you start sorting.")
+        return
+
+    card_id = _focused_card_id(unassigned_ids, session_token)
+    card_index = unassigned_ids.index(card_id)
+    navigation_left, navigation_right = st.columns(2)
+    with navigation_left:
+        if st.button("← Previous item", disabled=len(unassigned_ids) == 1, key="board_previous"):
+            st.session_state[f"focused_card_{session_token}"] = unassigned_ids[(card_index - 1) % len(unassigned_ids)]
+            st.rerun()
+    with navigation_right:
+        if st.button("Next item →", disabled=len(unassigned_ids) == 1, key="board_next"):
+            st.session_state[f"focused_card_{session_token}"] = unassigned_ids[(card_index + 1) % len(unassigned_ids)]
+            st.rerun()
+
+    _render_large_card(cards_by_id[card_id])
+    st.markdown("##### Place this item in a category bin")
+    columns = st.columns(min(len(active_categories), 3))
+    for index, category in enumerate(active_categories):
+        with columns[index % len(columns)]:
+            style = category_styles.get(category, default_category_style)
+            count = len(st.session_state["placements"].get(category, []))
+            with st.container(border=True):
+                st.markdown(f"<div style='font-weight:700; color:{style['text']};'>{html.escape(category)}</div>", unsafe_allow_html=True)
+                st.caption(f"{count} item{'s' if count != 1 else ''} currently here")
+                if st.button("Place here", key=f"board_move_{card_id}_{category}", use_container_width=True):
+                    _move_card(st.session_state["placements"], card_id, category, participant_service, session_token, study)
+                    remaining = st.session_state["placements"]["Unassigned"]
+                    if remaining:
+                        st.session_state[f"focused_card_{session_token}"] = remaining[min(card_index, len(remaining) - 1)]
+                    st.rerun()
+
+
 def render_card_sort_workspace(study: Study, cards: List[Card], participant_service=None, session_token: str = ""):
     st.markdown("""
     <style>
@@ -174,105 +286,78 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
     unassigned_ids = st.session_state["placements"].get("Unassigned", [])
     active_categories = st.session_state["categories"]
 
-    # A stacked workspace keeps the participant focused on the unsorted card
-    # while still making their organized categories easy to review below.
-    deck_col = st.container()
-
-    with deck_col:
+    layout = getattr(study, "participant_layout", "STANDARD")
+    if layout == "FOCUSED":
+        _render_focused_carousel(cards_by_id, unassigned_ids, active_categories, study, participant_service, session_token)
+    elif layout == "BOARD":
+        _render_board_sorter(
+            cards_by_id, unassigned_ids, active_categories, category_styles, default_category_style,
+            study, participant_service, session_token,
+        )
+    else:
+        # The original deck remains available as the standard layout.
         st.markdown(f"### 2. Sort the unassigned deck ({len(unassigned_ids)} {plural_label})")
         st.caption("For each item, choose the category that fits best. You can unassign an item later if you change your mind.")
-        
         if not unassigned_ids:
             st.success(f"🎉 All {plural_label.lower()} have been placed into categories!")
         else:
-            # Search filter for large decks
             search_query = ""
             if len(unassigned_ids) > 10:
-                search_query = st.text_input("🔍 Search unassigned cards:", placeholder="Type to filter...", key="deck_search").strip().lower()
-
-            filtered_unassigned = []
-            for cid in unassigned_ids:
-                c_obj = cards_by_id.get(cid)
-                if c_obj:
-                    if search_query:
-                        if search_query in c_obj.title.lower() or search_query in c_obj.description.lower():
-                            filtered_unassigned.append(cid)
-                    else:
-                        filtered_unassigned.append(cid)
-
-            # Pagination
+                search_query = st.text_input("Search unassigned items", placeholder="Type to filter...", key="deck_search").strip().lower()
+            filtered_unassigned = [
+                card_id for card_id in unassigned_ids
+                if card_id in cards_by_id and (
+                    not search_query
+                    or search_query in cards_by_id[card_id].title.lower()
+                    or search_query in cards_by_id[card_id].description.lower()
+                )
+            ]
             items_per_page = 10
-            total_items = len(filtered_unassigned)
-            
-            if total_items > items_per_page:
-                total_pages = (total_items + items_per_page - 1) // items_per_page
-                page = st.number_input(f"Page (1 of {total_pages})", min_value=1, max_value=total_pages, value=1, step=1, key="deck_page_num")
-                start_idx = (page - 1) * items_per_page
-                end_idx = min(start_idx + items_per_page, total_items)
-                page_ids = filtered_unassigned[start_idx:end_idx]
-                st.caption(f"Showing items {start_idx + 1}–{end_idx} of {total_items}")
+            if len(filtered_unassigned) > items_per_page:
+                total_pages = (len(filtered_unassigned) + items_per_page - 1) // items_per_page
+                page = st.number_input("Deck page", min_value=1, max_value=total_pages, value=1, step=1, key="deck_page_num")
+                page_ids = filtered_unassigned[(page - 1) * items_per_page: page * items_per_page]
+                st.caption(f"Showing page {page} of {total_pages}")
             else:
                 page_ids = filtered_unassigned
-
-            for cid in page_ids:
-                c_obj = cards_by_id.get(cid)
-                if not c_obj:
-                    continue
-
+            for card_id in page_ids:
+                card = cards_by_id[card_id]
                 with st.container():
-                    card_fill = _safe_color(c_obj.color_fill, "#EFF6FF")
+                    card_fill = _safe_color(card.color_fill, "#EFF6FF")
                     if card_fill == "#FFFFFF":
                         card_fill = "#EFF6FF"
-                    card_text = _safe_color(c_obj.color_text, "#0F172A")
-                    card_border = _safe_color(c_obj.color_border, "#2563EB")
-                    st.markdown(
-                        f"""
-                        <div class="card-box" style="background:{card_fill}; color:{card_text}; border-left-color:{card_border};">
-                            <div class="card-title" style="color:{card_text};">{html.escape(c_obj.title)}</div>
-                            {f'<div class="card-desc">{html.escape(c_obj.description)}</div>' if c_obj.description else ''}
-                            {f'<div class="card-example">e.g. {html.escape(c_obj.example)}</div>' if c_obj.example else ''}
-                        </div>
-                        """,
-                        unsafe_allow_html=True
+                    card_text = _safe_color(card.color_text, "#0F172A")
+                    card_border = _safe_color(card.color_border, "#2563EB")
+                    description_html = (
+                        f'<div class="card-desc">{html.escape(card.description)}</div>'
+                        if card.description else ""
                     )
-
-                    if active_categories:
-                        # Direct Clickable Buttons if <= 6 categories
-                        if len(active_categories) <= 6:
-                            btn_cols = st.columns(min(len(active_categories), 3))
-                            for idx, cat_name in enumerate(active_categories):
-                                col_target = btn_cols[idx % min(len(active_categories), 3)]
-                                with col_target:
-                                    if st.button(f"➡️ {cat_name}", key=f"btn_move_{cid}_{cat_name}", use_container_width=True):
-                                        st.session_state["placements"] = SortService.move_card(
-                                            st.session_state["placements"], cid, cat_name
-                                        )
-                                        if participant_service:
-                                            participant_service.record_interaction(
-                                                session_token, study, "card_moved", {"card_id": cid, "category": cat_name}
-                                            )
-                                        st.rerun()
-                        # Dropdown selector fallback if > 6 categories
-                        else:
-                            cat_options = ["Move to category..."] + active_categories
-                            selected_cat = st.selectbox(
-                                f"Assign '{c_obj.title}'",
-                                options=cat_options,
-                                key=f"sel_cat_{cid}",
-                                label_visibility="collapsed"
-                            )
-                            if selected_cat != "Move to category...":
-                                st.session_state["placements"] = SortService.move_card(
-                                    st.session_state["placements"], cid, selected_cat
-                                )
-                                if participant_service:
-                                    participant_service.record_interaction(
-                                        session_token, study, "card_moved", {"card_id": cid, "category": selected_cat}
-                                    )
-                                st.rerun()
+                    example_html = (
+                        f'<div class="card-example">e.g. {html.escape(card.example)}</div>'
+                        if card.example else ""
+                    )
+                    st.markdown(
+                        f'<div class="card-box" style="background:{card_fill}; color:{card_text}; border-left-color:{card_border};">'
+                        f'<div class="card-title">{html.escape(card.title)}</div>'
+                        f'{description_html}'
+                        f'{example_html}'
+                        '</div>',
+                        unsafe_allow_html=True,
+                    )
+                    if active_categories and len(active_categories) <= 6:
+                        columns = st.columns(min(len(active_categories), 3))
+                        for index, category in enumerate(active_categories):
+                            with columns[index % len(columns)]:
+                                if st.button(f"Place in {category}", key=f"deck_move_{card_id}_{category}", use_container_width=True):
+                                    _move_card(st.session_state["placements"], card_id, category, participant_service, session_token, study)
+                                    st.rerun()
+                    elif active_categories:
+                        category = st.selectbox("Move to category", ["Choose a category..."] + active_categories, key=f"deck_category_{card_id}")
+                        if category != "Choose a category...":
+                            _move_card(st.session_state["placements"], card_id, category, participant_service, session_token, study)
+                            st.rerun()
                     else:
-                        st.caption("👈 Create a category above to start placing cards.")
-                    st.markdown("<div style='margin-bottom: 12px;'></div>", unsafe_allow_html=True)
+                        st.caption("Create a category above to start placing items.")
 
     st.markdown("---")
     board_col = st.container()

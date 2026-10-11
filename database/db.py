@@ -119,6 +119,7 @@ def init_db(db_path=None):
         require_all_placed INTEGER DEFAULT 1,
         log_interactions INTEGER DEFAULT 1,
         category_order TEXT DEFAULT 'RANDOM',
+        participant_layout TEXT DEFAULT 'STANDARD',
         reflection_questions_json TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -130,6 +131,8 @@ def init_db(db_path=None):
     study_columns = {row["name"] for row in cursor.execute("PRAGMA table_info(studies)")}
     if "category_order" not in study_columns:
         cursor.execute("ALTER TABLE studies ADD COLUMN category_order TEXT DEFAULT 'RANDOM'")
+    if "participant_layout" not in study_columns:
+        cursor.execute("ALTER TABLE studies ADD COLUMN participant_layout TEXT DEFAULT 'STANDARD'")
 
     # Cards table
     cursor.execute('''
