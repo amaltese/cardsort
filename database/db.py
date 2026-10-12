@@ -1,7 +1,7 @@
 import os
 import sqlite3
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from services.google_storage import is_configured, load_state, save_state
 
@@ -36,13 +36,15 @@ def _export_state(connection: sqlite3.Connection) -> Dict[str, List[Dict[str, ob
     return {"tables": tables}
 
 
-def _restore_state(connection: sqlite3.Connection, state: Dict[str, object]) -> None:
+def _restore_state(connection: sqlite3.Connection, state: Dict[str, object]) -> Tuple[int, int]:
     """Replace a blank local runtime database with its private Sheet snapshot."""
     global _sync_suspended
     tables = state.get("tables", {}) if isinstance(state, dict) else {}
     if not any(tables.get(name) for name in SYNC_TABLES):
-        return
+        return 0, 0
 
+    restored_rows = 0
+    skipped_rows = 0
     _sync_suspended = True
     try:
         for name in reversed(SYNC_TABLES):
@@ -51,14 +53,33 @@ def _restore_state(connection: sqlite3.Connection, state: Dict[str, object]) -> 
             rows = tables.get(name, [])
             if not rows:
                 continue
-            columns = list(rows[0].keys())
+            # The spreadsheet's headers can legitimately lag behind a newer
+            # app version. Only restore columns that exist in this database;
+            # SQLite supplies defaults for newer columns that are absent.
+            table_columns = {
+                row["name"] for row in connection.execute(f"PRAGMA table_info({name})")
+            }
+            columns = [column for column in rows[0].keys() if column in table_columns]
+            if not columns:
+                skipped_rows += len(rows)
+                continue
             column_list = ", ".join(columns)
             placeholders = ", ".join("?" for _ in columns)
-            values = [tuple(row.get(column) for column in columns) for row in rows]
-            connection.executemany(f"INSERT INTO {name} ({column_list}) VALUES ({placeholders})", values)
+            statement = f"INSERT INTO {name} ({column_list}) VALUES ({placeholders})"
+            for row in rows:
+                try:
+                    connection.execute(statement, tuple(row.get(column) for column in columns))
+                    restored_rows += 1
+                except sqlite3.IntegrityError:
+                    # A manually edited Sheet or a duplicate legacy row should
+                    # never prevent the entire research workspace from opening.
+                    # Keep the valid rows and let the next normal save repair
+                    # the remote snapshot.
+                    skipped_rows += 1
         sqlite3.Connection.commit(connection)
     finally:
         _sync_suspended = False
+    return restored_rows, skipped_rows
 
 
 class SyncedConnection(sqlite3.Connection):
@@ -238,7 +259,13 @@ def init_db(db_path=None):
 
     if not db_path and not _remote_state_loaded and is_configured():
         try:
-            _restore_state(conn, load_state() or {})
+            restored_rows, skipped_rows = _restore_state(conn, load_state() or {})
+            if skipped_rows:
+                print(
+                    "Card Sort restored "
+                    f"{restored_rows} row(s) from Google storage and skipped "
+                    f"{skipped_rows} invalid or duplicate row(s)."
+                )
         finally:
             # A temporary network failure should not repeatedly download state
             # during a single page render. A later app restart will retry.

@@ -1,6 +1,6 @@
 import os
 import unittest
-from database.db import init_db
+from database.db import get_connection, init_db, _restore_state
 from database.models import Study, Card
 from services.study_service import StudyService
 from services.participant_service import ParticipantService
@@ -57,6 +57,30 @@ class TestCardSortPlatform(unittest.TestCase):
         self.assertTrue(ok, message)
         restored = self.study_service.get_study(study.study_id)
         self.assertEqual(restored.participant_layout, "FOCUSED")
+
+    def test_restore_skips_duplicate_remote_rows_without_failing(self):
+        connection = get_connection(self.test_db)
+        state = {
+            "tables": {
+                "studies": [
+                    {
+                        "study_id": "std_restore", "token": "duplicate-token", "title": "First",
+                        "condition": "CLOSED", "category_order": "RANDOM",
+                    },
+                    {
+                        "study_id": "std_conflict", "token": "duplicate-token", "title": "Second",
+                        "condition": "CLOSED", "category_order": "RANDOM",
+                    },
+                ]
+            }
+        }
+        restored_rows, skipped_rows = _restore_state(connection, state)
+        connection.close()
+
+        self.assertEqual(restored_rows, 1)
+        self.assertEqual(skipped_rows, 1)
+        restored = self.study_service.get_study("std_restore")
+        self.assertEqual(restored.title, "First")
 
     def test_sort_service_movement(self):
         placements = {"Unassigned": ["crd_1", "crd_2"], "Group A": []}
