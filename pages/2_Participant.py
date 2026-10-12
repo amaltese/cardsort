@@ -27,6 +27,9 @@ def clear_participant_state():
     for key in ["session_token", "categories", "placements", "category_descriptions", "category_review_notice", "completed_code"]:
         if key in st.session_state:
             del st.session_state[key]
+    for key in list(st.session_state):
+        if key.startswith("tabletop_"):
+            del st.session_state[key]
 
 if not study_token:
     st.title("Participant Portal")
@@ -97,7 +100,7 @@ if study_token:
         else:
             # Active Sort View
             starting_categories = (
-                study_service.cat_repo.get_categories_for_study(study.study_id)
+                study_service.get_categories_for_participants(study.study_id)
                 if study.condition in {"CLOSED", "HYBRID"}
                 else []
             )

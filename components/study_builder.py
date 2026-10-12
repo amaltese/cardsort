@@ -11,6 +11,7 @@ PARTICIPANT_LAYOUT_OPTIONS = {
     "Standard deck and category review": "STANDARD",
     "Focused carousel (one large card at a time)": "FOCUSED",
     "Board-style click-to-move (experimental)": "BOARD",
+    "Interactive tabletop: drag or select a card (experimental)": "TABLETOP",
 }
 
 CONDITION_EXPLANATIONS = {
@@ -112,7 +113,7 @@ def render_study_builder(study_service: StudyService):
     layout_label = st.selectbox(
         "Participant sorting layout",
         list(PARTICIPANT_LAYOUT_OPTIONS),
-        help="The standard deck is the existing interface. The focused and board-style options show one item at a time; participants can still review and change placed items below.",
+        help="The standard deck is the existing interface. The tabletop keeps all bins visible and lets participants drag items or select an item and then a bin. Placed items can be moved again directly in the tabletop.",
         key="new_study_participant_layout",
     )
     st.markdown("##### Optional Settings")
@@ -178,7 +179,7 @@ def render_study_settings(study, study_service: StudyService):
         "Participant sorting layout",
         list(PARTICIPANT_LAYOUT_OPTIONS),
         index=list(PARTICIPANT_LAYOUT_OPTIONS).index(current_layout_label),
-        help="Participants can always review and change placed items below the active sorting area.",
+        help="The experimental tabletop keeps cards visible inside category bins and supports both drag-and-drop and select-card-then-bin interactions.",
         key=f"settings_layout_{study.study_id}",
     )
     st.caption("Card colors are set in Cards / Items; category colors are set in Starting Categories.")

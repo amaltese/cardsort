@@ -22,9 +22,13 @@ def render_category_editor(study_id: str, study_service: StudyService):
 
         if st.form_submit_button("Add Category"):
             if name.strip():
-                study_service.add_category_to_study(study_id, name, desc, fill, text_color, border)
-                st.success(f"Added category: {name}")
-                st.rerun()
+                try:
+                    study_service.add_category_to_study(study_id, name, desc, fill, text_color, border)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.success(f"Added category: {name.strip()}")
+                    st.rerun()
             else:
                 st.error("Category name is required.")
 
@@ -52,19 +56,18 @@ def render_category_editor(study_id: str, study_service: StudyService):
                     with e3:
                         edited_border = st.color_picker("Border Color", cat.color_border)
                     if st.form_submit_button("Save Category"):
-                        if not edited_name.strip():
-                            st.error("Category name is required.")
-                        elif edited_name.strip() != cat.name and any(
-                            other.name == edited_name.strip() for other in categories
-                        ):
-                            st.error("Category names must be unique within a study.")
+                        try:
+                            study_service.update_category(
+                                cat,
+                                edited_name,
+                                edited_description,
+                                edited_fill,
+                                edited_text,
+                                edited_border,
+                            )
+                        except ValueError as exc:
+                            st.error(str(exc))
                         else:
-                            cat.name = edited_name.strip()
-                            cat.description = edited_description.strip()
-                            cat.color_fill = edited_fill
-                            cat.color_text = edited_text
-                            cat.color_border = edited_border
-                            study_service.cat_repo.save_categories([cat])
                             st.success("Category updated.")
                             st.rerun()
         with cols[1]:

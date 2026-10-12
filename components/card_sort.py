@@ -5,6 +5,7 @@ import re
 from typing import List, Dict
 from database.models import Study, Card
 from services.sort_service import SortService
+from components.tabletop_sort import render_tabletop_component
 
 def pluralize_label(label: str) -> str:
     lbl = (label or "Card").strip()
@@ -18,12 +19,188 @@ def _safe_color(value: str, fallback: str) -> str:
     return value if re.fullmatch(r"#[0-9a-fA-F]{6}", value or "") else fallback
 
 
-def _move_card(placements, card_id, category_name, participant_service, session_token, study):
+def _card_location(placements, card_id):
+    for category_name, card_ids in placements.items():
+        if card_id in card_ids:
+            return category_name
+    return None
+
+
+def _move_card(
+    placements, card_id, category_name, participant_service, session_token, study,
+    method="button", source_category=None,
+):
+    source_category = source_category or _card_location(placements, card_id)
     st.session_state["placements"] = SortService.move_card(placements, card_id, category_name)
     if participant_service:
+        payload = {"card_id": card_id, "category": category_name}
+        if source_category:
+            payload["from_category"] = source_category
+        if method:
+            payload["method"] = method
         participant_service.record_interaction(
-            session_token, study, "card_moved", {"card_id": card_id, "category": category_name}
+            session_token, study, "card_moved", payload
         )
+
+
+def _component_state_value(component_key, value_name):
+    component_state = st.session_state.get(component_key)
+    if component_state is None:
+        return None
+    if isinstance(component_state, dict):
+        return component_state.get(value_name)
+    return getattr(component_state, value_name, None)
+
+
+def _clear_tabletop_history(session_token):
+    st.session_state.pop(f"tabletop_history_{session_token}", None)
+
+
+def _render_tabletop_sorter(
+    cards_by_id, unassigned_ids, active_categories, category_styles,
+    default_category_style, study, participant_service, session_token,
+):
+    st.markdown(f"### 2. Interactive tabletop ({len(unassigned_ids)} remaining)")
+    item_label = (study.item_label or "Item").strip().lower()
+    plural_label = pluralize_label(study.item_label).lower()
+    st.caption(
+        f"Drag {plural_label} between the tray and category bins, or select a {item_label} and then "
+        f"click Place here. Select any placed {item_label} to move it again."
+    )
+    if not active_categories:
+        st.info("Create a category above before you start sorting.")
+        return
+
+    component_key = f"tabletop_workspace_{session_token}"
+    history_key = f"tabletop_history_{session_token}"
+    move_seen_key = f"tabletop_move_seen_{session_token}"
+    undo_seen_key = f"tabletop_undo_seen_{session_token}"
+    announcement_key = f"tabletop_announcement_{session_token}"
+    focus_key = f"tabletop_focus_target_{session_token}"
+
+    def handle_move():
+        move = _component_state_value(component_key, "move")
+        if not isinstance(move, dict):
+            return
+        event_id = str(move.get("event_id") or "")
+        if not event_id or st.session_state.get(move_seen_key) == event_id:
+            return
+        st.session_state[move_seen_key] = event_id
+
+        card_id = str(move.get("card_id") or "")
+        target = str(move.get("target_category") or "")
+        placements = st.session_state.get("placements", {})
+        source = _card_location(placements, card_id)
+        if card_id not in cards_by_id or target not in {"Unassigned", *active_categories}:
+            return
+        if not source or source == target:
+            return
+
+        history = st.session_state.setdefault(history_key, [])
+        history.append({"card_id": card_id, "source": source, "target": target})
+        if len(history) > 100:
+            del history[:-100]
+        method = str(move.get("method") or "tabletop")
+        if method not in {"click", "drag", "keyboard"}:
+            method = "tabletop"
+        _move_card(
+            placements, card_id, target, participant_service, session_token, study,
+            method=method, source_category=source,
+        )
+        if method == "keyboard":
+            remaining_ids = st.session_state["placements"].get("Unassigned", [])
+            if source == "Unassigned" and remaining_ids:
+                st.session_state[focus_key] = {"kind": "card", "card_id": remaining_ids[0]}
+            elif source != "Unassigned":
+                st.session_state[focus_key] = {"kind": "card", "card_id": card_id}
+            else:
+                st.session_state[focus_key] = {"kind": "undo"}
+        st.session_state[announcement_key] = f"{cards_by_id[card_id].title} moved to {target}."
+
+    def handle_undo():
+        undo = _component_state_value(component_key, "undo")
+        if not isinstance(undo, dict):
+            return
+        event_id = str(undo.get("event_id") or "")
+        if not event_id or st.session_state.get(undo_seen_key) == event_id:
+            return
+        st.session_state[undo_seen_key] = event_id
+
+        history = st.session_state.setdefault(history_key, [])
+        placements = st.session_state.get("placements", {})
+        if not history:
+            return
+        last_move = history.pop()
+        card_id = last_move.get("card_id")
+        source = last_move.get("source")
+        target = last_move.get("target")
+        if (
+            card_id not in cards_by_id
+            or source not in placements
+            or _card_location(placements, card_id) != target
+        ):
+            history.clear()
+            st.session_state[announcement_key] = "Undo history was reset because the categories changed."
+            return
+        _move_card(
+            placements, card_id, source, participant_service, session_token, study,
+            method="undo", source_category=target,
+        )
+        if str(undo.get("method") or "") == "keyboard":
+            st.session_state[focus_key] = {"kind": "card", "card_id": card_id}
+        st.session_state[announcement_key] = f"Last move undone. {cards_by_id[card_id].title} returned to {source}."
+
+    card_data = [
+        {
+            "id": card.card_id,
+            "title": card.title,
+            "description": card.description,
+            "example": card.example,
+            "fill": _safe_color(card.color_fill, "#EFF6FF"),
+            "text": _safe_color(card.color_text, "#0F172A"),
+            "border": _safe_color(card.color_border, "#2563EB"),
+        }
+        for card in cards_by_id.values()
+    ]
+    category_data = []
+    for category_name in active_categories:
+        style = category_styles.get(category_name, default_category_style)
+        category_data.append(
+            {
+                "name": category_name,
+                "description": (
+                    st.session_state.get("category_descriptions", {}).get(
+                        category_name, style.get("description", "")
+                    )
+                    if study.allow_category_descriptions
+                    else ""
+                ),
+                "fill": style["fill"],
+                "text": style["text"],
+                "border": style["border"],
+            }
+        )
+
+    mounted = render_tabletop_component(
+        {
+            "cards": card_data,
+            "categories": category_data,
+            "placements": {
+                category: list(card_ids)
+                for category, card_ids in st.session_state["placements"].items()
+            },
+            "can_undo": bool(st.session_state.get(history_key)),
+            "announcement": st.session_state.pop(announcement_key, ""),
+            "focus_target": st.session_state.pop(focus_key, None),
+            "item_label": item_label,
+            "plural_label": plural_label,
+        },
+        key=component_key,
+        on_move=handle_move,
+        on_undo=handle_undo,
+    )
+    if not mounted:
+        st.error("The interactive tabletop needs Streamlit 1.65 or newer. The app is still loading the required update.")
 
 
 def _render_large_card(card: Card):
@@ -174,20 +351,21 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
     </style>
     """, unsafe_allow_html=True)
 
-    plural_label = pluralize_label(study.item_label)
+    item_label = (study.item_label or "Item").strip() or "Item"
+    plural_label = pluralize_label(item_label)
 
     # Fetch DB starting categories
     db_categories = []
     if study.condition in ["CLOSED", "HYBRID"]:
         from services.study_service import StudyService
         svc = StudyService()
-        db_category_objects = svc.cat_repo.get_categories_for_study(study.study_id)
-        db_categories = [cat.name for cat in db_category_objects]
+        db_category_objects = svc.get_categories_for_participants(study.study_id)
+        db_categories = [category.name for category in db_category_objects]
     else:
         db_category_objects = []
     default_category_style = {"fill": "#E0F2FE", "text": "#0C4A6E", "border": "#0284C7"}
     category_styles = {}
-    for index, category in enumerate(db_category_objects):
+    for category in db_category_objects:
         style = {
             "fill": _safe_color(category.color_fill, default_category_style["fill"]),
             "text": _safe_color(category.color_text, default_category_style["text"]),
@@ -254,7 +432,16 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
             with c_btn:
                 if st.button("Add Category", type="primary", use_container_width=True):
                     clean_name = new_cat_name.strip()
-                    if clean_name and clean_name not in st.session_state["categories"] and clean_name != "Unassigned":
+                    existing_category_names = {
+                        category_name.casefold() for category_name in st.session_state["categories"]
+                    }
+                    if not clean_name:
+                        st.error("Enter a category name.")
+                    elif clean_name.casefold() == "unassigned":
+                        st.error("“Unassigned” is reserved for items that have not been placed yet.")
+                    elif clean_name.casefold() in existing_category_names:
+                        st.error("Choose a unique category name.")
+                    else:
                         placed_card_count = sum(
                             len(card_ids)
                             for category, card_ids in st.session_state["placements"].items()
@@ -287,10 +474,19 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
     active_categories = st.session_state["categories"]
 
     layout = getattr(study, "participant_layout", "STANDARD")
+    layout_state_key = f"tabletop_layout_{session_token}"
+    if st.session_state.get(layout_state_key) != layout:
+        _clear_tabletop_history(session_token)
+        st.session_state[layout_state_key] = layout
     if layout == "FOCUSED":
         _render_focused_carousel(cards_by_id, unassigned_ids, active_categories, study, participant_service, session_token)
     elif layout == "BOARD":
         _render_board_sorter(
+            cards_by_id, unassigned_ids, active_categories, category_styles, default_category_style,
+            study, participant_service, session_token,
+        )
+    elif layout == "TABLETOP":
+        _render_tabletop_sorter(
             cards_by_id, unassigned_ids, active_categories, category_styles, default_category_style,
             study, participant_service, session_token,
         )
@@ -359,13 +555,32 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
                     else:
                         st.caption("Create a category above to start placing items.")
 
-    st.markdown("---")
-    board_col = st.container()
-    with board_col:
-        if active_categories:
-            st.markdown(f"### 3. Review your categories ({len(active_categories)})")
-            st.caption("Review items already placed in each category. You can rename, describe, or remove categories when your study allows it.")
-            
+    category_controls_enabled = any(
+        [study.allow_delete_categories, study.allow_rename_categories, study.allow_category_descriptions]
+    )
+    if active_categories and (layout != "TABLETOP" or category_controls_enabled):
+        st.markdown("---")
+        if layout == "TABLETOP":
+            review_area = st.expander(
+                f"3. Optional category settings ({len(active_categories)})",
+                expanded=False,
+            )
+        else:
+            review_area = st.container()
+
+        with review_area:
+            if layout == "TABLETOP":
+                st.caption(
+                    "Your full arrangement is visible in the tabletop above. Open this section only "
+                    "to rename, describe, or remove a category."
+                )
+            else:
+                st.markdown(f"### 3. Review your categories ({len(active_categories)})")
+                st.caption(
+                    "Review items already placed in each category. You can rename, describe, or "
+                    "remove categories when your study allows it."
+                )
+
             num_cols = min(len(active_categories), 3)
             cat_columns = st.columns(num_cols)
 
@@ -374,22 +589,28 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
                 with col_target:
                     placed_ids = st.session_state["placements"].get(cat_name, [])
                     style = category_styles.get(cat_name, default_category_style)
-                    
+
                     st.markdown(
                         f"""
                         <div class="bucket-header" style="background:{style['fill']}; color:{style['text']}; border:2px solid {style['border']}; border-radius:6px; padding:8px;">
                             🏷️ {html.escape(cat_name)} <span style="font-weight:normal; font-size:13px;">({len(placed_ids)})</span>
                         </div>
                         """,
-                        unsafe_allow_html=True
+                        unsafe_allow_html=True,
                     )
 
                     if study.allow_delete_categories:
-                        if st.button("🗑️ Delete", key=f"del_cat_{cat_name}", help="Move cards back to unassigned deck and remove category"):
+                        if st.button(
+                            "🗑️ Delete",
+                            key=f"del_cat_{cat_name}",
+                            help="Move items back to the unassigned tray and remove this category",
+                        ):
                             st.session_state["placements"]["Unassigned"].extend(placed_ids)
                             del st.session_state["placements"][cat_name]
                             st.session_state["categories"].remove(cat_name)
                             st.session_state["category_descriptions"].pop(cat_name, None)
+                            if layout == "TABLETOP":
+                                _clear_tabletop_history(session_token)
                             if participant_service:
                                 participant_service.record_interaction(
                                     session_token, study, "category_deleted", {"category": cat_name}
@@ -400,13 +621,24 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
                         renamed = st.text_input("Rename category", value=cat_name, key=f"rename_{cat_name}")
                         if st.button("Rename", key=f"rename_button_{cat_name}"):
                             clean_name = renamed.strip()
-                            if not clean_name or clean_name == "Unassigned" or clean_name in st.session_state["categories"] and clean_name != cat_name:
+                            other_names = {
+                                name.casefold()
+                                for name in st.session_state["categories"]
+                                if name != cat_name
+                            }
+                            if not clean_name:
+                                st.error("Enter a category name.")
+                            elif clean_name.casefold() == "unassigned":
+                                st.error("“Unassigned” is reserved for items that have not been placed yet.")
+                            elif clean_name.casefold() in other_names:
                                 st.error("Choose a unique category name.")
                             elif clean_name != cat_name:
                                 st.session_state["placements"][clean_name] = st.session_state["placements"].pop(cat_name)
                                 st.session_state["categories"][st.session_state["categories"].index(cat_name)] = clean_name
                                 description = st.session_state["category_descriptions"].pop(cat_name, "")
                                 st.session_state["category_descriptions"][clean_name] = description
+                                if layout == "TABLETOP":
+                                    _clear_tabletop_history(session_token)
                                 if participant_service:
                                     participant_service.record_interaction(
                                         session_token, study, "category_renamed", {"from": cat_name, "to": clean_name}
@@ -419,29 +651,31 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
                             "Category description", value=current_description, key=f"desc_{cat_name}"
                         )
 
-                    if not placed_ids:
+                    if layout == "TABLETOP":
+                        st.caption(
+                            f"{len(placed_ids)} {item_label.lower() if len(placed_ids) == 1 else plural_label.lower()} "
+                            "currently in this category."
+                        )
+                    elif not placed_ids:
                         st.caption("*Empty bucket*")
                     else:
                         for cid in placed_ids:
                             c_obj = cards_by_id.get(cid)
                             if not c_obj:
                                 continue
-                            
+
                             st.markdown(
                                 f"""
                                 <div style="background:{_safe_color(c_obj.color_fill, '#FFFFFF')}; color:{_safe_color(c_obj.color_text, '#0F172A')}; border:1px solid {_safe_color(c_obj.color_border, '#CBD5E1')}; border-radius:6px; padding:8px 12px; margin-bottom:6px;">
                                     <span style="font-weight:600; font-size:14px;">{html.escape(c_obj.title)}</span>
                                 </div>
                                 """,
-                                unsafe_allow_html=True
+                                unsafe_allow_html=True,
                             )
                             if st.button("↩️ Unassign", key=f"unassign_{cid}_{cat_name}", use_container_width=True):
-                                st.session_state["placements"] = SortService.move_card(
-                                    st.session_state["placements"], cid, "Unassigned"
+                                _move_card(
+                                    st.session_state["placements"], cid, "Unassigned",
+                                    participant_service, session_token, study,
                                 )
-                                if participant_service:
-                                    participant_service.record_interaction(
-                                        session_token, study, "card_moved", {"card_id": cid, "category": "Unassigned"}
-                                    )
                                 st.rerun()
                     st.markdown("<hr style='margin: 12px 0;'>", unsafe_allow_html=True)

@@ -30,7 +30,7 @@ def render_participant_header(study: Study, starting_categories: Optional[List[C
             with columns[index % len(columns)]:
                 with st.container(border=True):
                     st.markdown(f"**{category.name}**")
-                    if category.description:
+                    if study.allow_category_descriptions and category.description:
                         st.caption(category.description)
     elif study.condition == "OPEN":
         st.info("You will create the categories that best fit your organization of these items.")

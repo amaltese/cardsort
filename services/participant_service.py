@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, List
 from database.models import ParticipantSession, Study, Card
 from database.repositories import StudyRepository, CategoryRepository
 from database.db import get_connection, sync_database
+from services.study_service import filter_participant_categories
 
 class ParticipantService:
     def __init__(self, db_path: Optional[str] = None):
@@ -80,7 +81,10 @@ class ParticipantService:
 
         if study.condition == "CLOSED":
             allowed_categories = {
-                category.name for category in self.cat_repo.get_categories_for_study(study.study_id)
+                category.name
+                for category in filter_participant_categories(
+                    self.cat_repo.get_categories_for_study(study.study_id)
+                )
             }
             unexpected = set(placements) - allowed_categories - {"Unassigned"}
             if unexpected:

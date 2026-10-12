@@ -1,7 +1,7 @@
 import os
 import unittest
 from database.db import get_connection, init_db, _restore_state
-from database.models import Study, Card
+from database.models import Study, Card, Category
 from services.study_service import StudyService
 from services.participant_service import ParticipantService
 from services.analysis_service import AnalysisService
@@ -52,11 +52,53 @@ class TestCardSortPlatform(unittest.TestCase):
 
     def test_researcher_can_choose_participant_layout(self):
         ok, message, study = self.study_service.create_study(
-            "Focused Layout", "", "", "", "CLOSED", participant_layout="FOCUSED"
+            "Tabletop Layout", "", "", "", "CLOSED", participant_layout="TABLETOP"
         )
         self.assertTrue(ok, message)
         restored = self.study_service.get_study(study.study_id)
-        self.assertEqual(restored.participant_layout, "FOCUSED")
+        self.assertEqual(restored.participant_layout, "TABLETOP")
+
+    def test_category_names_are_unique_and_cannot_use_unassigned(self):
+        _, _, study = self.study_service.create_study(
+            "Safe Categories", "", "", "", "HYBRID"
+        )
+        theme = self.study_service.add_category_to_study(study.study_id, "Theme")
+        other = self.study_service.add_category_to_study(study.study_id, "Other")
+
+        with self.assertRaisesRegex(ValueError, "unique"):
+            self.study_service.add_category_to_study(study.study_id, " theme ")
+        with self.assertRaisesRegex(ValueError, "reserved"):
+            self.study_service.add_category_to_study(study.study_id, "UNASSIGNED")
+        with self.assertRaisesRegex(ValueError, "unique"):
+            self.study_service.update_category(other, "THEME")
+        with self.assertRaisesRegex(ValueError, "reserved"):
+            self.study_service.update_category(theme, "unassigned")
+
+    def test_legacy_category_name_is_preserved_for_closed_sort_submission(self):
+        _, _, study = self.study_service.create_study(
+            "Legacy Categories", "", "", "", "CLOSED"
+        )
+        legacy_category = Category(
+            category_id="cat_legacy",
+            study_id=study.study_id,
+            name=" Theme ",
+            display_order=1,
+        )
+        self.study_service.cat_repo.save_categories([legacy_category])
+        visible_categories = self.study_service.get_categories_for_participants(study.study_id)
+        self.assertEqual([category.name for category in visible_categories], [" Theme "])
+
+        card = self.study_service.add_card_to_study(study.study_id, "Legacy Card")
+        participant_service = ParticipantService(self.test_db)
+        session = participant_service.create_fresh_session(study.study_id)
+        code = participant_service.submit_sort(
+            session["session_token"],
+            study,
+            [card],
+            {"Unassigned": [], " Theme ": [card.card_id]},
+            voice_memo_url="https://drive.example.test/private-memo.wav",
+        )
+        self.assertRegex(code, r"^[0-9A-F]{4}-[0-9A-F]{4}$")
 
     def test_restore_skips_duplicate_remote_rows_without_failing(self):
         connection = get_connection(self.test_db)

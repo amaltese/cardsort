@@ -7,6 +7,20 @@ from database.models import Study, Card, Category
 from database.repositories import StudyRepository, CardRepository, CategoryRepository
 from utils.validation import validate_study_meta, validate_card_csv
 
+
+def filter_participant_categories(categories: List[Category]) -> List[Category]:
+    """Remove invalid duplicate/reserved categories without rewriting stored names."""
+    filtered = []
+    seen_names = set()
+    for category in categories:
+        normalized_name = category.name.strip().casefold()
+        if not normalized_name or normalized_name == "unassigned" or normalized_name in seen_names:
+            continue
+        seen_names.add(normalized_name)
+        filtered.append(category)
+    return filtered
+
+
 class StudyService:
     def __init__(self, db_path: Optional[str] = None):
         self.study_repo = StudyRepository(db_path)
@@ -125,10 +139,17 @@ class StudyService:
 
     def add_category_to_study(self, study_id: str, name: str, description: str = "", fill: str = "#FFFFFF", text: str = "#000000", border: str = "#CCCCCC") -> Category:
         existing = self.cat_repo.get_categories_for_study(study_id)
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Category name is required.")
+        if clean_name.casefold() == "unassigned":
+            raise ValueError("“Unassigned” is reserved for items that have not been placed yet.")
+        if clean_name.casefold() in {category.name.strip().casefold() for category in existing}:
+            raise ValueError("Category names must be unique within a study.")
         cat = Category(
             category_id=f"cat_{uuid.uuid4().hex[:10]}",
             study_id=study_id,
-            name=name.strip(),
+            name=clean_name,
             description=description.strip(),
             display_order=len(existing) + 1,
             color_fill=fill,
@@ -137,6 +158,41 @@ class StudyService:
         )
         self.cat_repo.save_categories([cat])
         return cat
+
+    def update_category(
+        self,
+        category: Category,
+        name: str,
+        description: str = "",
+        fill: str = "#FFFFFF",
+        text: str = "#000000",
+        border: str = "#CCCCCC",
+    ) -> Category:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Category name is required.")
+        if clean_name.casefold() == "unassigned":
+            raise ValueError("“Unassigned” is reserved for items that have not been placed yet.")
+        existing = self.cat_repo.get_categories_for_study(category.study_id)
+        if clean_name.casefold() in {
+            other.name.strip().casefold()
+            for other in existing
+            if other.category_id != category.category_id
+        }:
+            raise ValueError("Category names must be unique within a study.")
+        category.name = clean_name
+        category.description = description.strip()
+        category.color_fill = fill
+        category.color_text = text
+        category.color_border = border
+        self.cat_repo.save_categories([category])
+        return category
+
+    def get_categories_for_participants(self, study_id: str) -> List[Category]:
+        """Return safe starting categories while preserving their stored names."""
+        return filter_participant_categories(
+            self.cat_repo.get_categories_for_study(study_id)
+        )
 
     def get_study(self, study_id: str) -> Optional[Study]:
         return self.study_repo.get_study_by_id(study_id)
