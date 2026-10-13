@@ -58,6 +58,13 @@ class TestCardSortPlatform(unittest.TestCase):
         restored = self.study_service.get_study(study.study_id)
         self.assertEqual(restored.participant_layout, "TABLETOP")
 
+        ok, message, freeform_study = self.study_service.create_study(
+            "Freeform Layout", "", "", "", "OPEN", participant_layout="FREEFORM"
+        )
+        self.assertTrue(ok, message)
+        restored_freeform = self.study_service.get_study(freeform_study.study_id)
+        self.assertEqual(restored_freeform.participant_layout, "FREEFORM")
+
     def test_category_names_are_unique_and_cannot_use_unassigned(self):
         _, _, study = self.study_service.create_study(
             "Safe Categories", "", "", "", "HYBRID"

@@ -53,30 +53,41 @@ def _component_state_value(component_key, value_name):
 
 
 def _clear_tabletop_history(session_token):
-    st.session_state.pop(f"tabletop_history_{session_token}", None)
+    for layout_name in ("tabletop", "freeform"):
+        st.session_state.pop(f"{layout_name}_history_{session_token}", None)
 
 
 def _render_tabletop_sorter(
     cards_by_id, unassigned_ids, active_categories, category_styles,
-    default_category_style, study, participant_service, session_token,
+    default_category_style, study, participant_service, session_token, mode="TABLETOP",
 ):
-    st.markdown(f"### 2. Interactive tabletop ({len(unassigned_ids)} remaining)")
+    is_freeform = mode == "FREEFORM"
+    heading = "Freeform sorting workspace" if is_freeform else "Interactive tabletop"
+    st.markdown(f"### 2. {heading} ({len(unassigned_ids)} remaining)")
     item_label = (study.item_label or "Item").strip().lower()
     plural_label = pluralize_label(study.item_label).lower()
-    st.caption(
-        f"Drag {plural_label} between the tray and category bins, or select a {item_label} and then "
-        f"click Place here. Select any placed {item_label} to move it again."
-    )
-    if not active_categories:
+    if is_freeform:
+        st.caption(
+            f"Drag a {item_label} into the workspace to start a new named pile, then move {plural_label} "
+            f"between piles. You can also select a {item_label}, then choose a pile or create a new one."
+        )
+    else:
+        st.caption(
+            f"Drag {plural_label} between the tray and category bins, or select a {item_label} and then "
+            f"click Place here. Select any placed {item_label} to move it again."
+        )
+    if not active_categories and not (is_freeform and study.allow_new_categories):
         st.info("Create a category above before you start sorting.")
         return
 
-    component_key = f"tabletop_workspace_{session_token}"
-    history_key = f"tabletop_history_{session_token}"
-    move_seen_key = f"tabletop_move_seen_{session_token}"
-    undo_seen_key = f"tabletop_undo_seen_{session_token}"
-    announcement_key = f"tabletop_announcement_{session_token}"
-    focus_key = f"tabletop_focus_target_{session_token}"
+    prefix = mode.lower()
+    component_key = f"{prefix}_workspace_{session_token}"
+    history_key = f"{prefix}_history_{session_token}"
+    move_seen_key = f"{prefix}_move_seen_{session_token}"
+    undo_seen_key = f"{prefix}_undo_seen_{session_token}"
+    create_seen_key = f"{prefix}_create_seen_{session_token}"
+    announcement_key = f"{prefix}_announcement_{session_token}"
+    focus_key = f"{prefix}_focus_target_{session_token}"
 
     def handle_move():
         move = _component_state_value(component_key, "move")
@@ -117,6 +128,51 @@ def _render_tabletop_sorter(
                 st.session_state[focus_key] = {"kind": "undo"}
         st.session_state[announcement_key] = f"{cards_by_id[card_id].title} moved to {target}."
 
+    def handle_create():
+        create = _component_state_value(component_key, "create")
+        if not isinstance(create, dict) or not (is_freeform and study.allow_new_categories):
+            return
+        event_id = str(create.get("event_id") or "")
+        if not event_id or st.session_state.get(create_seen_key) == event_id:
+            return
+        st.session_state[create_seen_key] = event_id
+
+        card_id = str(create.get("card_id") or "")
+        clean_name = str(create.get("category_name") or "").strip()
+        placements = st.session_state.get("placements", {})
+        source = _card_location(placements, card_id)
+        existing_names = {category.casefold() for category in st.session_state["categories"]}
+        if card_id not in cards_by_id or not source:
+            return
+        if not clean_name:
+            st.session_state[announcement_key] = "Enter a name for the new pile."
+            return
+        if clean_name.casefold() == "unassigned" or clean_name.casefold() in existing_names:
+            st.session_state[announcement_key] = "Choose a unique name for the new pile."
+            return
+
+        st.session_state["categories"].append(clean_name)
+        st.session_state["placements"][clean_name] = []
+        st.session_state["category_descriptions"][clean_name] = ""
+        history = st.session_state.setdefault(history_key, [])
+        history.append(
+            {"card_id": card_id, "source": source, "target": clean_name, "created_category": clean_name}
+        )
+        if len(history) > 100:
+            del history[:-100]
+        method = str(create.get("method") or "tabletop")
+        _move_card(
+            placements, card_id, clean_name, participant_service, session_token, study,
+            method="new_pile", source_category=source,
+        )
+        if participant_service:
+            participant_service.record_interaction(
+                session_token, study, "category_created", {"category": clean_name, "method": method}
+            )
+        if method == "keyboard":
+            st.session_state[focus_key] = {"kind": "card", "card_id": card_id}
+        st.session_state[announcement_key] = f"Created {clean_name} and moved {cards_by_id[card_id].title} there."
+
     def handle_undo():
         undo = _component_state_value(component_key, "undo")
         if not isinstance(undo, dict):
@@ -146,9 +202,20 @@ def _render_tabletop_sorter(
             placements, card_id, source, participant_service, session_token, study,
             method="undo", source_category=target,
         )
+        created_category = last_move.get("created_category")
+        if (
+            created_category
+            and created_category in st.session_state["categories"]
+            and not st.session_state["placements"].get(created_category)
+        ):
+            del st.session_state["placements"][created_category]
+            st.session_state["categories"].remove(created_category)
+            st.session_state["category_descriptions"].pop(created_category, None)
+            st.session_state[announcement_key] = f"Last move undone and empty pile “{created_category}” removed."
+        else:
+            st.session_state[announcement_key] = f"Last move undone. {cards_by_id[card_id].title} returned to {source}."
         if str(undo.get("method") or "") == "keyboard":
             st.session_state[focus_key] = {"kind": "card", "card_id": card_id}
-        st.session_state[announcement_key] = f"Last move undone. {cards_by_id[card_id].title} returned to {source}."
 
     card_data = [
         {
@@ -194,10 +261,13 @@ def _render_tabletop_sorter(
             "focus_target": st.session_state.pop(focus_key, None),
             "item_label": item_label,
             "plural_label": plural_label,
+            "mode": mode,
+            "can_create": is_freeform and study.allow_new_categories,
         },
         key=component_key,
         on_move=handle_move,
         on_undo=handle_undo,
+        on_create=handle_create,
     )
     if not mounted:
         st.error("The interactive tabletop needs Streamlit 1.65 or newer. The app is still loading the required update.")
@@ -414,6 +484,7 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
             st.session_state["placements"][cat_name] = []
 
     cards_by_id = {c.card_id: c for c in cards}
+    layout = getattr(study, "participant_layout", "STANDARD")
 
     st.markdown("### 1. Categories")
     if study.condition == "CLOSED":
@@ -424,7 +495,7 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
         st.caption("Create the categories that best represent how you would organize these items.")
 
     # Category Creation Header
-    if study.allow_new_categories:
+    if study.allow_new_categories and layout != "FREEFORM":
         with st.expander("Add a category", expanded=(len(st.session_state["categories"]) == 0)):
             c_input, c_btn = st.columns([3, 1])
             with c_input:
@@ -473,7 +544,6 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
     unassigned_ids = st.session_state["placements"].get("Unassigned", [])
     active_categories = st.session_state["categories"]
 
-    layout = getattr(study, "participant_layout", "STANDARD")
     layout_state_key = f"tabletop_layout_{session_token}"
     if st.session_state.get(layout_state_key) != layout:
         _clear_tabletop_history(session_token)
@@ -489,6 +559,11 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
         _render_tabletop_sorter(
             cards_by_id, unassigned_ids, active_categories, category_styles, default_category_style,
             study, participant_service, session_token,
+        )
+    elif layout == "FREEFORM":
+        _render_tabletop_sorter(
+            cards_by_id, unassigned_ids, active_categories, category_styles, default_category_style,
+            study, participant_service, session_token, mode="FREEFORM",
         )
     else:
         # The original deck remains available as the standard layout.
@@ -558,9 +633,9 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
     category_controls_enabled = any(
         [study.allow_delete_categories, study.allow_rename_categories, study.allow_category_descriptions]
     )
-    if active_categories and (layout != "TABLETOP" or category_controls_enabled):
+    if active_categories and (layout not in {"TABLETOP", "FREEFORM"} or category_controls_enabled):
         st.markdown("---")
-        if layout == "TABLETOP":
+        if layout in {"TABLETOP", "FREEFORM"}:
             review_area = st.expander(
                 f"3. Optional category settings ({len(active_categories)})",
                 expanded=False,
@@ -569,9 +644,9 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
             review_area = st.container()
 
         with review_area:
-            if layout == "TABLETOP":
+            if layout in {"TABLETOP", "FREEFORM"}:
                 st.caption(
-                    "Your full arrangement is visible in the tabletop above. Open this section only "
+                    "Your full arrangement is visible in the sorting workspace above. Open this section only "
                     "to rename, describe, or remove a category."
                 )
             else:
@@ -609,7 +684,7 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
                             del st.session_state["placements"][cat_name]
                             st.session_state["categories"].remove(cat_name)
                             st.session_state["category_descriptions"].pop(cat_name, None)
-                            if layout == "TABLETOP":
+                            if layout in {"TABLETOP", "FREEFORM"}:
                                 _clear_tabletop_history(session_token)
                             if participant_service:
                                 participant_service.record_interaction(
@@ -637,7 +712,7 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
                                 st.session_state["categories"][st.session_state["categories"].index(cat_name)] = clean_name
                                 description = st.session_state["category_descriptions"].pop(cat_name, "")
                                 st.session_state["category_descriptions"][clean_name] = description
-                                if layout == "TABLETOP":
+                                if layout in {"TABLETOP", "FREEFORM"}:
                                     _clear_tabletop_history(session_token)
                                 if participant_service:
                                     participant_service.record_interaction(
@@ -651,7 +726,7 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
                             "Category description", value=current_description, key=f"desc_{cat_name}"
                         )
 
-                    if layout == "TABLETOP":
+                    if layout in {"TABLETOP", "FREEFORM"}:
                         st.caption(
                             f"{len(placed_ids)} {item_label.lower() if len(placed_ids) == 1 else plural_label.lower()} "
                             "currently in this category."

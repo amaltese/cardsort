@@ -170,6 +170,42 @@ TABLETOP_CSS = """
   padding: 3px;
 }
 
+.freeform-mode .tabletop-workspace { grid-template-columns: minmax(230px, .58fr) minmax(0, 2.4fr); }
+.freeform-mode .category-area {
+  align-content: start;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--st-border-color, #cbd5e1) 28%, transparent) 1px, transparent 1px),
+    linear-gradient(color-mix(in srgb, var(--st-border-color, #cbd5e1) 28%, transparent) 1px, transparent 1px),
+    var(--st-secondary-background-color, #f8fafc);
+  background-size: 22px 22px;
+  border: 1px solid var(--st-border-color, #cbd5e1);
+  border-radius: 12px;
+  max-height: none;
+  min-height: 520px;
+  overflow: visible;
+  padding: .85rem;
+}
+.freeform-mode .card-bin { background: var(--st-background-color, #fff); box-shadow: 0 2px 7px rgba(15, 23, 42, .08); }
+.freeform-mode .bin-card-list { max-height: 390px; }
+.new-pile-zone {
+  align-items: center;
+  border: 2px dashed var(--st-primary-color, #2563eb);
+  color: var(--st-primary-color, #2563eb);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 170px;
+  text-align: center;
+}
+.new-pile-zone.is-target { background: color-mix(in srgb, var(--st-primary-color, #2563eb) 8%, transparent); }
+.new-pile-title { font-size: .95rem; font-weight: 800; }
+.new-pile-copy { font-size: .82rem; line-height: 1.4; margin-top: .35rem; max-width: 250px; opacity: .86; }
+.pile-composer { width: 100%; }
+.pile-composer label { display: block; font-size: .78rem; font-weight: 750; margin-bottom: .35rem; }
+.pile-composer-row { display: flex; gap: .4rem; }
+.pile-composer input { min-width: 0; flex: 1; }
+.pile-composer-cancel { background: transparent; border: 0; color: inherit; cursor: pointer; font: inherit; margin-top: .45rem; text-decoration: underline; }
+
 .card-list { display: flex; flex-direction: column; gap: .42rem; }
 .tray-list { max-height: 650px; overflow: auto; padding: 2px; }
 .bin-card-list { max-height: 330px; overflow: auto; padding: 2px; }
@@ -216,6 +252,8 @@ button:focus-visible, input:focus-visible { outline: 3px solid var(--st-primary-
   .unsorted-bin { position: static; }
   .tray-list { max-height: 350px; }
   .category-area { grid-template-columns: 1fr; max-height: none; overflow: visible; }
+  .freeform-mode .tabletop-workspace { grid-template-columns: 1fr; }
+  .freeform-mode .category-area { min-height: 0; }
   .bin-card-list { max-height: 280px; }
 }
 """
@@ -228,8 +266,11 @@ export default function(component) {
   const categories = Array.isArray(data?.categories) ? data.categories : [];
   const itemLabel = String(data?.item_label || "item").trim().toLowerCase() || "item";
   const pluralLabel = String(data?.plural_label || `${itemLabel}s`).trim().toLowerCase() || `${itemLabel}s`;
+  const isFreeform = data?.mode === "FREEFORM";
+  const canCreate = Boolean(data?.can_create);
   let placements = JSON.parse(JSON.stringify(data?.placements || {}));
   let selectedCardId = null;
+  let pendingPileCardId = null;
   let searchTerm = "";
 
   const progress = parentElement.querySelector("#tabletop-progress");
@@ -245,6 +286,8 @@ export default function(component) {
   const unassignButton = parentElement.querySelector("#tabletop-unassign");
   const search = parentElement.querySelector("#tabletop-search");
   const bins = parentElement.querySelector("#tabletop-bins");
+
+  parentElement.querySelector(".tabletop-root")?.classList.toggle("freeform-mode", isFreeform);
 
   const makeEventId = () => {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -312,7 +355,19 @@ export default function(component) {
     });
   }
 
+  function beginNewPile(cardId, moveKeyboardFocus = false) {
+    if (!isFreeform || !canCreate || !cardById(cardId)) return;
+    pendingPileCardId = cardId;
+    selectedCardId = null;
+    render();
+    announce(`Name the new pile for ${cardById(cardId)?.title || "this item"}.`);
+    if (moveKeyboardFocus) {
+      requestAnimationFrame(() => parentElement.querySelector(".pile-composer input")?.focus());
+    }
+  }
+
   function selectCard(cardId, moveKeyboardFocus) {
+    pendingPileCardId = null;
     selectedCardId = selectedCardId === cardId ? null : cardId;
     render();
     if (selectedCardId) announce(`${cardById(cardId)?.title || "Item"} selected. Choose a category.`);
@@ -322,6 +377,7 @@ export default function(component) {
         if (selectedCardId) {
           const destination = parentElement.querySelector(".category-area .place-button:not(:disabled)");
           if (destination) destination.focus();
+          else if (isFreeform && canCreate) parentElement.querySelector(".new-pile-zone")?.focus();
           else if (!unassignButton.disabled) unassignButton.focus();
           else focusCard(cardId);
           return;
@@ -481,6 +537,127 @@ export default function(component) {
     return section;
   }
 
+  function renderNewPileZone() {
+    const section = document.createElement("section");
+    section.className = `card-bin new-pile-zone${selectedCardId ? " is-target" : ""}`;
+    section.tabIndex = 0;
+    section.setAttribute("role", "button");
+    section.setAttribute(
+      "aria-label",
+      pendingPileCardId
+        ? `Name a new pile for ${cardById(pendingPileCardId)?.title || "the selected item"}`
+        : `Create a new category pile${selectedCardId ? " with the selected item" : ""}`,
+    );
+
+    const beginFromDrop = event => {
+      event.preventDefault();
+      section.classList.remove("drag-over");
+      beginNewPile(event.dataTransfer.getData("text/plain"));
+    };
+    section.ondragenter = event => {
+      event.preventDefault();
+      section.classList.add("drag-over");
+    };
+    section.ondragover = event => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    };
+    section.ondragleave = event => {
+      if (!section.contains(event.relatedTarget)) section.classList.remove("drag-over");
+    };
+    section.ondrop = beginFromDrop;
+
+    if (!pendingPileCardId) {
+      const title = document.createElement("div");
+      title.className = "new-pile-title";
+      title.textContent = selectedCardId ? "Create a new pile here" : "Create a new pile";
+      const copy = document.createElement("div");
+      copy.className = "new-pile-copy";
+      copy.textContent = selectedCardId
+        ? `Click here to name a new pile for the selected ${itemLabel}, or drag an item here.`
+        : `Drag an item here to start a new category pile.`;
+      section.append(title, copy);
+      section.onclick = event => {
+        if (event.target.closest("input, button")) return;
+        if (selectedCardId) beginNewPile(selectedCardId, false);
+      };
+      section.onkeydown = event => {
+        if ((event.key === "Enter" || event.key === " ") && selectedCardId) {
+          event.preventDefault();
+          beginNewPile(selectedCardId, true);
+        }
+      };
+      return section;
+    }
+
+    const pendingCard = cardById(pendingPileCardId);
+    const composer = document.createElement("div");
+    composer.className = "pile-composer";
+    const label = document.createElement("label");
+    label.textContent = `Name the new pile for ${pendingCard?.title || "this item"}`;
+    label.htmlFor = "new-pile-name";
+    const row = document.createElement("div");
+    row.className = "pile-composer-row";
+    const input = document.createElement("input");
+    input.id = "new-pile-name";
+    input.type = "text";
+    input.placeholder = "e.g., Related ideas";
+    input.autocomplete = "off";
+    input.maxLength = 120;
+    const create = document.createElement("button");
+    create.type = "button";
+    create.className = "place-button";
+    create.textContent = "Create pile";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "pile-composer-cancel";
+    cancel.textContent = "Cancel";
+    const submit = method => {
+      const name = input.value.trim();
+      if (!name) {
+        announce("Enter a name for the new pile.");
+        input.focus();
+        return;
+      }
+      setStateValue("create", {
+        event_id: makeEventId(),
+        card_id: pendingPileCardId,
+        category_name: name,
+        method,
+      });
+    };
+    create.onclick = event => {
+      event.stopPropagation();
+      submit("click");
+    };
+    create.onkeydown = event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      event.stopPropagation();
+      submit("keyboard");
+    };
+    input.onkeydown = event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submit("keyboard");
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        pendingPileCardId = null;
+        render();
+      }
+    };
+    cancel.onclick = event => {
+      event.stopPropagation();
+      pendingPileCardId = null;
+      render();
+    };
+    row.append(input, create);
+    composer.append(label, row, cancel);
+    section.appendChild(composer);
+    return section;
+  }
+
   function render() {
     const unsortedIds = Array.isArray(placements.Unassigned) ? placements.Unassigned : [];
     const placedCount = Math.max(0, cards.length - unsortedIds.length);
@@ -497,7 +674,9 @@ export default function(component) {
     });
     addCards(unsortedCards, filteredIds, searchTerm ? `No matching unsorted ${pluralLabel}.` : `All ${pluralLabel} have been placed.`);
 
-    bins.replaceChildren(...categories.map(renderCategory));
+    const workspaceNodes = categories.map(renderCategory);
+    if (isFreeform && canCreate) workspaceNodes.push(renderNewPileZone());
+    bins.replaceChildren(...workspaceNodes);
     renderDetail();
   }
 
@@ -574,16 +753,18 @@ def render_tabletop_component(
     key: str,
     on_move: Callable[[], None],
     on_undo: Callable[[], None],
+    on_create: Callable[[], None],
 ) -> bool:
     """Mount the interactive board and return whether Components v2 is available."""
     if _TABLETOP_COMPONENT is None:
         return False
     _TABLETOP_COMPONENT(
         data=data,
-        default={"move": None, "undo": None},
+        default={"move": None, "undo": None, "create": None},
         key=key,
         on_move_change=on_move,
         on_undo_change=on_undo,
+        on_create_change=on_create,
         width="stretch",
         height="content",
     )
