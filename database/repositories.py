@@ -13,14 +13,15 @@ class StudyRepository:
         cursor = conn.cursor()
         cursor.execute("""
         INSERT INTO studies (
-            study_id, token, title, description, instructions, researcher_info,
+            study_id, token, title, description, instructions, researcher_info, instruction_video_url,
             condition, item_label, allow_new_categories, allow_rename_categories,
             allow_delete_categories, allow_category_descriptions, allow_unassigned,
             require_all_placed, log_interactions, category_order, participant_layout, reflection_questions_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(study_id) DO UPDATE SET
             title=excluded.title, description=excluded.description,
             instructions=excluded.instructions, researcher_info=excluded.researcher_info,
+            instruction_video_url=excluded.instruction_video_url,
             condition=excluded.condition, item_label=excluded.item_label,
             allow_new_categories=excluded.allow_new_categories,
             allow_rename_categories=excluded.allow_rename_categories,
@@ -35,7 +36,7 @@ class StudyRepository:
             updated_at=CURRENT_TIMESTAMP
         """, (
             study.study_id, study.token, study.title, study.description,
-            study.instructions, study.researcher_info, study.condition,
+            study.instructions, study.researcher_info, study.instruction_video_url, study.condition,
             study.item_label, int(study.allow_new_categories), int(study.allow_rename_categories),
             int(study.allow_delete_categories), int(study.allow_category_descriptions),
             int(study.allow_unassigned), int(study.require_all_placed),
@@ -87,6 +88,7 @@ class StudyRepository:
             description=row["description"] or "",
             instructions=row["instructions"] or "",
             researcher_info=row["researcher_info"] or "",
+            instruction_video_url=row["instruction_video_url"] or "",
             condition=row["condition"],
             item_label=row["item_label"] or "Card",
             allow_new_categories=bool(row["allow_new_categories"]),

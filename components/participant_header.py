@@ -15,6 +15,9 @@ def render_participant_header(study: Study, starting_categories: Optional[List[C
             st.markdown(f"**About this study:** {study.description}")
         if study.instructions:
             st.markdown(f"**Your task:** {study.instructions}")
+        if study.instruction_video_url.strip():
+            st.markdown("**Optional walkthrough video:**")
+            st.video(study.instruction_video_url.strip())
         st.markdown(
             f"You will organize **{pluralize_label(study.item_label).lower()}** into categories, review your organization, and record a short voice memo before submitting."
         )

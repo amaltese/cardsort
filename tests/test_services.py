@@ -65,6 +65,15 @@ class TestCardSortPlatform(unittest.TestCase):
         restored_freeform = self.study_service.get_study(freeform_study.study_id)
         self.assertEqual(restored_freeform.participant_layout, "FREEFORM")
 
+    def test_instruction_video_url_is_optional_and_persists(self):
+        video_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        ok, message, study = self.study_service.create_study(
+            "Video Directions", "", "", "", "OPEN", instruction_video_url=video_url
+        )
+        self.assertTrue(ok, message)
+        restored = self.study_service.get_study(study.study_id)
+        self.assertEqual(restored.instruction_video_url, video_url)
+
     def test_category_names_are_unique_and_cannot_use_unassigned(self):
         _, _, study = self.study_service.create_study(
             "Safe Categories", "", "", "", "HYBRID"

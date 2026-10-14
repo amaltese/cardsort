@@ -92,6 +92,12 @@ def render_study_builder(study_service: StudyService):
     title = st.text_input("Study Title*", placeholder="e.g., K-12 Teacher Competency Mapping", key="new_study_title")
     description = st.text_area("Study Description", placeholder="Brief description visible to participants", key="new_study_description")
     instructions = st.text_area("Participant Instructions", placeholder="Sort these capacities into meaningful categories...", key="new_study_instructions")
+    instruction_video_url = st.text_input(
+        "Instruction video URL (optional)",
+        placeholder="https://youtu.be/...",
+        help="Paste an unlisted YouTube link to show a short walkthrough in the participant directions. Leave blank to show no video.",
+        key="new_study_instruction_video_url",
+    )
     researcher_info = st.text_input("Researcher / Institution", placeholder="Department of Education, University X", key="new_study_researcher")
 
     col1, col2 = st.columns(2)
@@ -129,6 +135,7 @@ def render_study_builder(study_service: StudyService):
         success, message, study = study_service.create_study(
             title=title, description=description, instructions=instructions,
             researcher_info=researcher_info, condition=condition, item_label=item_label,
+            instruction_video_url=instruction_video_url,
             allow_new_categories=permissions["allow_new"], allow_rename_categories=permissions["allow_rename"],
             allow_delete_categories=permissions["allow_delete"], allow_category_descriptions=allow_descriptions,
             allow_unassigned=allow_unassigned, require_all_placed=require_all,
@@ -152,6 +159,13 @@ def render_study_settings(study, study_service: StudyService):
     title = st.text_input("Study Title*", value=study.title, key=f"settings_title_{study.study_id}")
     description = st.text_area("Study Description", value=study.description, key=f"settings_description_{study.study_id}")
     instructions = st.text_area("Participant Instructions", value=study.instructions, key=f"settings_instructions_{study.study_id}")
+    instruction_video_url = st.text_input(
+        "Instruction video URL (optional)",
+        value=study.instruction_video_url,
+        placeholder="https://youtu.be/...",
+        help="Paste an unlisted YouTube link to show a short walkthrough in the participant directions. Leave blank to show no video.",
+        key=f"settings_instruction_video_url_{study.study_id}",
+    )
     researcher_info = st.text_input("Researcher / Institution", value=study.researcher_info, key=f"settings_researcher_{study.study_id}")
     condition = st.selectbox("Sort Type*", CONDITIONS, index=CONDITIONS.index(condition), key=f"settings_condition_{study.study_id}")
     item_options = ["Card", "Capacity", "Concept", "Skill", "Strategy", "Idea", "Behavior", "Attribute"]
@@ -204,6 +218,7 @@ def render_study_settings(study, study_service: StudyService):
         study.title = title.strip()
         study.description = description.strip()
         study.instructions = instructions.strip()
+        study.instruction_video_url = instruction_video_url.strip()
         study.researcher_info = researcher_info.strip()
         study.condition = condition
         study.item_label = item_label

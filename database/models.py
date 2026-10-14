@@ -9,6 +9,7 @@ class Study:
     description: str = ""
     instructions: str = ""
     researcher_info: str = ""
+    instruction_video_url: str = ""
     condition: str = "HYBRID"
     item_label: str = "Card"
     allow_new_categories: bool = True
@@ -32,6 +33,7 @@ class Study:
             "description": self.description,
             "instructions": self.instructions,
             "researcher_info": self.researcher_info,
+            "instruction_video_url": self.instruction_video_url,
             "condition": self.condition,
             "item_label": self.item_label,
             "allow_new_categories": self.allow_new_categories,

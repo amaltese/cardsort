@@ -130,6 +130,7 @@ def init_db(db_path=None):
         description TEXT,
         instructions TEXT,
         researcher_info TEXT,
+        instruction_video_url TEXT,
         condition TEXT NOT NULL,
         item_label TEXT DEFAULT 'Card',
         allow_new_categories INTEGER DEFAULT 1,
@@ -154,6 +155,8 @@ def init_db(db_path=None):
         cursor.execute("ALTER TABLE studies ADD COLUMN category_order TEXT DEFAULT 'RANDOM'")
     if "participant_layout" not in study_columns:
         cursor.execute("ALTER TABLE studies ADD COLUMN participant_layout TEXT DEFAULT 'STANDARD'")
+    if "instruction_video_url" not in study_columns:
+        cursor.execute("ALTER TABLE studies ADD COLUMN instruction_video_url TEXT DEFAULT ''")
 
     # Cards table
     cursor.execute('''

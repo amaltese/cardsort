@@ -44,7 +44,8 @@ class StudyService:
         log_interactions: bool = True,
         category_order: str = "RANDOM",
         participant_layout: str = "STANDARD",
-        reflection_questions: Optional[List[str]] = None
+        reflection_questions: Optional[List[str]] = None,
+        instruction_video_url: str = "",
     ) -> Tuple[bool, str, Optional[Study]]:
         is_valid, err = validate_study_meta(title, condition)
         if not is_valid:
@@ -59,6 +60,7 @@ class StudyService:
             description=description.strip(),
             instructions=instructions.strip(),
             researcher_info=researcher_info.strip(),
+            instruction_video_url=instruction_video_url.strip(),
             condition=condition,
             item_label=item_label.strip() or "Card",
             allow_new_categories=allow_new_categories,
