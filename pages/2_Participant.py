@@ -75,7 +75,7 @@ if study_token:
                 snapshot = json.loads(session_data["snapshot_json"])
                 st.subheader("Summary of Submitted Organization")
                 for cat, items in snapshot.get("placements", {}).items():
-                    with st.expander(f"📁 {cat} ({len(items)} items)", expanded=True):
+                    with st.expander(f"📁 {cat}", expanded=True):
                         for item in items:
                             st.markdown(f"• {item}")
                             

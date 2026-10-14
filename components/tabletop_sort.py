@@ -30,7 +30,7 @@ TABLETOP_HTML = """
       <div class="bin-heading-row">
         <div>
           <div class="bin-kicker">Item tray</div>
-          <div class="bin-title">Unsorted <span id="tabletop-unsorted-count" class="bin-count"></span></div>
+          <div class="bin-title">Unsorted</div>
         </div>
         <button id="tabletop-unassign" class="place-button" type="button">Move selected here</button>
       </div>
@@ -146,7 +146,6 @@ TABLETOP_CSS = """
 }
 
 .bin-title { font-size: .98rem; font-weight: 800; line-height: 1.25; }
-.bin-count { font-size: .8rem; font-weight: 650; opacity: .75; }
 .bin-description { font-size: .78rem; line-height: 1.35; margin: -.2rem 0 .55rem; opacity: .75; }
 
 .search-label { display: block; font-size: .75rem; font-weight: 650; margin: .35rem 0 .2rem; }
@@ -290,7 +289,6 @@ export default function(component) {
   const detailExample = parentElement.querySelector("#tabletop-detail-example");
   const undoButton = parentElement.querySelector("#tabletop-undo");
   const unsortedBin = parentElement.querySelector("#tabletop-unsorted");
-  const unsortedCount = parentElement.querySelector("#tabletop-unsorted-count");
   const unsortedCards = parentElement.querySelector("#tabletop-unsorted-cards");
   const unassignButton = parentElement.querySelector("#tabletop-unassign");
   const search = parentElement.querySelector("#tabletop-search");
@@ -538,7 +536,7 @@ export default function(component) {
     } else {
       const title = document.createElement("div");
       title.className = "bin-title";
-      title.textContent = `${category.name} (${ids.length})`;
+      title.textContent = category.name;
       label.append(kicker, title);
       if (isFreeform && canCreate) {
         const rename = document.createElement("button");
@@ -646,7 +644,6 @@ export default function(component) {
     const unsortedIds = Array.isArray(placements.Unassigned) ? placements.Unassigned : [];
     const placedCount = Math.max(0, cards.length - unsortedIds.length);
     progress.textContent = `${placedCount} of ${cards.length} ${pluralLabel} placed · ${unsortedIds.length} remaining`;
-    unsortedCount.textContent = `(${unsortedIds.length})`;
     undoButton.disabled = !data?.can_undo;
     unassignButton.disabled = !selectedCardId || sourceFor(selectedCardId) === "Unassigned";
     unsortedBin.classList.toggle("is-target", Boolean(selectedCardId));

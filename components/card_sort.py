@@ -418,10 +418,8 @@ def _render_board_sorter(cards_by_id, unassigned_ids, active_categories, categor
     for index, category in enumerate(active_categories):
         with columns[index % len(columns)]:
             style = category_styles.get(category, default_category_style)
-            count = len(st.session_state["placements"].get(category, []))
             with st.container(border=True):
                 st.markdown(f"<div style='font-weight:700; color:{style['text']};'>{html.escape(category)}</div>", unsafe_allow_html=True)
-                st.caption(f"{count} item{'s' if count != 1 else ''} currently here")
                 if st.button("Place here", key=f"board_move_{card_id}_{category}", use_container_width=True):
                     _move_card(st.session_state["placements"], card_id, category, participant_service, session_token, study)
                     remaining = st.session_state["placements"]["Unassigned"]
@@ -721,7 +719,7 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
                     st.markdown(
                         f"""
                         <div class="bucket-header" style="background:{style['fill']}; color:{style['text']}; border:2px solid {style['border']}; border-radius:6px; padding:8px;">
-                            🏷️ {html.escape(cat_name)} <span style="font-weight:normal; font-size:13px;">({len(placed_ids)})</span>
+                            🏷️ {html.escape(cat_name)}
                         </div>
                         """,
                         unsafe_allow_html=True,
@@ -779,14 +777,9 @@ def render_card_sort_workspace(study: Study, cards: List[Card], participant_serv
                             "Category description", value=current_description, key=f"desc_{cat_name}"
                         )
 
-                    if layout in {"TABLETOP", "FREEFORM"}:
-                        st.caption(
-                            f"{len(placed_ids)} {item_label.lower() if len(placed_ids) == 1 else plural_label.lower()} "
-                            "currently in this category."
-                        )
-                    elif not placed_ids:
+                    if layout not in {"TABLETOP", "FREEFORM"} and not placed_ids:
                         st.caption("*Empty bucket*")
-                    else:
+                    elif layout not in {"TABLETOP", "FREEFORM"}:
                         for cid in placed_ids:
                             c_obj = cards_by_id.get(cid)
                             if not c_obj:
