@@ -28,7 +28,7 @@ def clear_participant_state():
         if key in st.session_state:
             del st.session_state[key]
     for key in list(st.session_state):
-        if key.startswith("tabletop_"):
+        if key.startswith(("tabletop_", "freeform_")):
             del st.session_state[key]
 
 if not study_token:
@@ -119,6 +119,12 @@ if study_token:
 
                 unassigned_ids = st.session_state.get("placements", {}).get("Unassigned", [])
                 plural_lbl = pluralize_label(study.item_label)
+                temporary_pile_names = [
+                    name for name in st.session_state.get(
+                        f"freeform_default_categories_{st.session_state['session_token']}", []
+                    )
+                    if name in st.session_state.get("categories", [])
+                ]
 
                 reflection_questions = study.reflection_questions or ["Please explain your sorting logic."]
                 voice_prompt = " ".join(reflection_questions)
@@ -139,6 +145,14 @@ if study_token:
 
                 if study.require_all_placed and len(unassigned_ids) > 0:
                     st.warning(f"⚠️ Please move the remaining **{len(unassigned_ids)} unassigned {plural_lbl.lower()}** into categories before submitting.")
+                    st.button("Submit Card Sort", disabled=True, use_container_width=True)
+                elif temporary_pile_names:
+                    st.warning(
+                        "Before submitting, rename your temporary pile "
+                        f"{'name' if len(temporary_pile_names) == 1 else 'names'}: "
+                        f"**{', '.join(temporary_pile_names)}**. "
+                        "Use the **Rename** button on each pile in the sorting workspace."
+                    )
                     st.button("Submit Card Sort", disabled=True, use_container_width=True)
                 else:
                     if st.button("🚀 Submit Final Card Sort", type="primary", use_container_width=True):

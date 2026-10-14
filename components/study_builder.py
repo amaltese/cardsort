@@ -114,7 +114,7 @@ def render_study_builder(study_service: StudyService):
     layout_label = st.selectbox(
         "Participant sorting layout",
         list(PARTICIPANT_LAYOUT_OPTIONS),
-        help="The tabletop uses visible category bins. The freeform workspace is closest to a physical open card sort: participants drag an item into empty space, name that pile, then move items among visible piles.",
+        help="The tabletop uses visible category bins. The freeform workspace is closest to a physical open card sort: participants drag an item into empty space, receive a temporary numbered pile, then rename piles when ready.",
         key="new_study_participant_layout",
     )
     st.markdown("##### Optional Settings")
@@ -180,7 +180,7 @@ def render_study_settings(study, study_service: StudyService):
         "Participant sorting layout",
         list(PARTICIPANT_LAYOUT_OPTIONS),
         index=list(PARTICIPANT_LAYOUT_OPTIONS).index(current_layout_label),
-        help="The tabletop uses visible category bins. The freeform workspace lets participants create named piles by dragging items into empty workspace space, then move items among them.",
+        help="The tabletop uses visible category bins. The freeform workspace lets participants create temporary numbered piles by dragging items into empty workspace space, rename them when ready, and move items among them.",
         key=f"settings_layout_{study.study_id}",
     )
     st.caption("Card colors are set in Cards / Items; category colors are set in Starting Categories.")

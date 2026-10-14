@@ -200,11 +200,20 @@ TABLETOP_CSS = """
 .new-pile-zone.is-target { background: color-mix(in srgb, var(--st-primary-color, #2563eb) 8%, transparent); }
 .new-pile-title { font-size: .95rem; font-weight: 800; }
 .new-pile-copy { font-size: .82rem; line-height: 1.4; margin-top: .35rem; max-width: 250px; opacity: .86; }
-.pile-composer { width: 100%; }
-.pile-composer label { display: block; font-size: .78rem; font-weight: 750; margin-bottom: .35rem; }
-.pile-composer-row { display: flex; gap: .4rem; }
-.pile-composer input { min-width: 0; flex: 1; }
-.pile-composer-cancel { background: transparent; border: 0; color: inherit; cursor: pointer; font: inherit; margin-top: .45rem; text-decoration: underline; }
+.rename-pile-button {
+  appearance: none;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  margin-left: .2rem;
+  padding: .1rem .28rem;
+}
+.rename-pile-button:hover { background: rgba(15, 23, 42, .10); }
+.pile-rename-row { display: flex; gap: .35rem; width: 100%; }
+.pile-rename-input { min-width: 0; flex: 1; font: inherit; padding: .32rem .42rem; }
 
 .card-list { display: flex; flex-direction: column; gap: .42rem; }
 .tray-list { max-height: 650px; overflow: auto; padding: 2px; }
@@ -270,7 +279,7 @@ export default function(component) {
   const canCreate = Boolean(data?.can_create);
   let placements = JSON.parse(JSON.stringify(data?.placements || {}));
   let selectedCardId = null;
-  let pendingPileCardId = null;
+  let editingPileName = null;
   let searchTerm = "";
 
   const progress = parentElement.querySelector("#tabletop-progress");
@@ -355,19 +364,17 @@ export default function(component) {
     });
   }
 
-  function beginNewPile(cardId, moveKeyboardFocus = false) {
+  function createNewPile(cardId, method) {
     if (!isFreeform || !canCreate || !cardById(cardId)) return;
-    pendingPileCardId = cardId;
+    const source = sourceFor(cardId);
+    if (!source) return;
     selectedCardId = null;
     render();
-    announce(`Name the new pile for ${cardById(cardId)?.title || "this item"}.`);
-    if (moveKeyboardFocus) {
-      requestAnimationFrame(() => parentElement.querySelector(".pile-composer input")?.focus());
-    }
+    setStateValue("create", { event_id: makeEventId(), card_id: cardId, method });
   }
 
   function selectCard(cardId, moveKeyboardFocus) {
-    pendingPileCardId = null;
+    editingPileName = null;
     selectedCardId = selectedCardId === cardId ? null : cardId;
     render();
     if (selectedCardId) announce(`${cardById(cardId)?.title || "Item"} selected. Choose a category.`);
@@ -492,11 +499,62 @@ export default function(component) {
     const kicker = document.createElement("div");
     kicker.className = "bin-kicker";
     kicker.textContent = "Category bin";
-    const title = document.createElement("div");
-    title.className = "bin-title";
     const ids = Array.isArray(placements[category.name]) ? placements[category.name] : [];
-    title.textContent = `${category.name} (${ids.length})`;
-    label.append(kicker, title);
+    if (isFreeform && editingPileName === category.name) {
+      const renameRow = document.createElement("div");
+      renameRow.className = "pile-rename-row";
+      const renameInput = document.createElement("input");
+      renameInput.className = "pile-rename-input";
+      renameInput.type = "text";
+      renameInput.value = category.name;
+      renameInput.maxLength = 120;
+      renameInput.setAttribute("aria-label", `Rename ${category.name}`);
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "place-button";
+      save.textContent = "Save";
+      const submitRename = method => {
+        const name = renameInput.value.trim();
+        if (!name) {
+          announce("Enter a name for this pile.");
+          renameInput.focus();
+          return;
+        }
+        setStateValue("rename", {
+          event_id: makeEventId(),
+          old_name: category.name,
+          new_name: name,
+          method,
+        });
+      };
+      save.onclick = event => { event.stopPropagation(); submitRename("click"); };
+      renameInput.onkeydown = event => {
+        if (event.key === "Enter") { event.preventDefault(); submitRename("keyboard"); }
+        if (event.key === "Escape") { event.preventDefault(); editingPileName = null; render(); }
+      };
+      renameRow.append(renameInput, save);
+      label.append(kicker, renameRow);
+      requestAnimationFrame(() => renameInput.focus());
+    } else {
+      const title = document.createElement("div");
+      title.className = "bin-title";
+      title.textContent = `${category.name} (${ids.length})`;
+      label.append(kicker, title);
+      if (isFreeform && canCreate) {
+        const rename = document.createElement("button");
+        rename.type = "button";
+        rename.className = "rename-pile-button";
+        rename.textContent = "Rename";
+        rename.setAttribute("aria-label", `Rename ${category.name}`);
+        rename.onclick = event => {
+          event.stopPropagation();
+          editingPileName = category.name;
+          selectedCardId = null;
+          render();
+        };
+        label.appendChild(rename);
+      }
+    }
 
     const place = document.createElement("button");
     place.type = "button";
@@ -530,7 +588,7 @@ export default function(component) {
     section.appendChild(list);
     section.onclick = event => {
       if (!selectedCardId) return;
-      if (event.target.closest(".sort-card") || event.target.closest(".place-button")) return;
+      if (event.target.closest(".sort-card") || event.target.closest("button, input")) return;
       if (sourceFor(selectedCardId) === category.name) return;
       placeSelected(category.name, "click");
     };
@@ -542,17 +600,12 @@ export default function(component) {
     section.className = `card-bin new-pile-zone${selectedCardId ? " is-target" : ""}`;
     section.tabIndex = 0;
     section.setAttribute("role", "button");
-    section.setAttribute(
-      "aria-label",
-      pendingPileCardId
-        ? `Name a new pile for ${cardById(pendingPileCardId)?.title || "the selected item"}`
-        : `Create a new category pile${selectedCardId ? " with the selected item" : ""}`,
-    );
+    section.setAttribute("aria-label", `Create a new category pile${selectedCardId ? " with the selected item" : ""}`);
 
     const beginFromDrop = event => {
       event.preventDefault();
       section.classList.remove("drag-over");
-      beginNewPile(event.dataTransfer.getData("text/plain"));
+      createNewPile(event.dataTransfer.getData("text/plain"), "drag");
     };
     section.ondragenter = event => {
       event.preventDefault();
@@ -567,94 +620,25 @@ export default function(component) {
     };
     section.ondrop = beginFromDrop;
 
-    if (!pendingPileCardId) {
-      const title = document.createElement("div");
-      title.className = "new-pile-title";
-      title.textContent = selectedCardId ? "Create a new pile here" : "Create a new pile";
-      const copy = document.createElement("div");
-      copy.className = "new-pile-copy";
-      copy.textContent = selectedCardId
-        ? `Click here to name a new pile for the selected ${itemLabel}, or drag an item here.`
-        : `Drag an item here to start a new category pile.`;
-      section.append(title, copy);
-      section.onclick = event => {
-        if (event.target.closest("input, button")) return;
-        if (selectedCardId) beginNewPile(selectedCardId, false);
-      };
-      section.onkeydown = event => {
-        if ((event.key === "Enter" || event.key === " ") && selectedCardId) {
-          event.preventDefault();
-          beginNewPile(selectedCardId, true);
-        }
-      };
-      return section;
-    }
-
-    const pendingCard = cardById(pendingPileCardId);
-    const composer = document.createElement("div");
-    composer.className = "pile-composer";
-    const label = document.createElement("label");
-    label.textContent = `Name the new pile for ${pendingCard?.title || "this item"}`;
-    label.htmlFor = "new-pile-name";
-    const row = document.createElement("div");
-    row.className = "pile-composer-row";
-    const input = document.createElement("input");
-    input.id = "new-pile-name";
-    input.type = "text";
-    input.placeholder = "e.g., Related ideas";
-    input.autocomplete = "off";
-    input.maxLength = 120;
-    const create = document.createElement("button");
-    create.type = "button";
-    create.className = "place-button";
-    create.textContent = "Create pile";
-    const cancel = document.createElement("button");
-    cancel.type = "button";
-    cancel.className = "pile-composer-cancel";
-    cancel.textContent = "Cancel";
-    const submit = method => {
-      const name = input.value.trim();
-      if (!name) {
-        announce("Enter a name for the new pile.");
-        input.focus();
-        return;
-      }
-      setStateValue("create", {
-        event_id: makeEventId(),
-        card_id: pendingPileCardId,
-        category_name: name,
-        method,
-      });
+    const title = document.createElement("div");
+    title.className = "new-pile-title";
+    title.textContent = selectedCardId ? "Create a new pile here" : "Create a new pile";
+    const copy = document.createElement("div");
+    copy.className = "new-pile-copy";
+    copy.textContent = selectedCardId
+      ? `Click here to make the next numbered category for the selected ${itemLabel}, or drag an item here.`
+      : `Drag an item here to create the next numbered category.`;
+    section.append(title, copy);
+    section.onclick = event => {
+      if (event.target.closest("input, button")) return;
+      if (selectedCardId) createNewPile(selectedCardId, "click");
     };
-    create.onclick = event => {
-      event.stopPropagation();
-      submit("click");
-    };
-    create.onkeydown = event => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      event.stopPropagation();
-      submit("keyboard");
-    };
-    input.onkeydown = event => {
-      if (event.key === "Enter") {
+    section.onkeydown = event => {
+      if ((event.key === "Enter" || event.key === " ") && selectedCardId) {
         event.preventDefault();
-        submit("keyboard");
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        pendingPileCardId = null;
-        render();
+        createNewPile(selectedCardId, "keyboard");
       }
     };
-    cancel.onclick = event => {
-      event.stopPropagation();
-      pendingPileCardId = null;
-      render();
-    };
-    row.append(input, create);
-    composer.append(label, row, cancel);
-    section.appendChild(composer);
     return section;
   }
 
@@ -754,17 +738,19 @@ def render_tabletop_component(
     on_move: Callable[[], None],
     on_undo: Callable[[], None],
     on_create: Callable[[], None],
+    on_rename: Callable[[], None],
 ) -> bool:
     """Mount the interactive board and return whether Components v2 is available."""
     if _TABLETOP_COMPONENT is None:
         return False
     _TABLETOP_COMPONENT(
         data=data,
-        default={"move": None, "undo": None, "create": None},
+        default={"move": None, "undo": None, "create": None, "rename": None},
         key=key,
         on_move_change=on_move,
         on_undo_change=on_undo,
         on_create_change=on_create,
+        on_rename_change=on_rename,
         width="stretch",
         height="content",
     )

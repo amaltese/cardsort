@@ -57,6 +57,19 @@ def _clear_tabletop_history(session_token):
         st.session_state.pop(f"{layout_name}_history_{session_token}", None)
 
 
+def _next_default_category_name(categories):
+    """Return the first unused participant-friendly default pile name."""
+    used_numbers = set()
+    for category in categories:
+        match = re.fullmatch(r"Category\s+(\d+)", str(category).strip(), re.IGNORECASE)
+        if match:
+            used_numbers.add(int(match.group(1)))
+    number = 1
+    while number in used_numbers:
+        number += 1
+    return f"Category {number}"
+
+
 def _render_tabletop_sorter(
     cards_by_id, unassigned_ids, active_categories, category_styles,
     default_category_style, study, participant_service, session_token, mode="TABLETOP",
@@ -68,8 +81,8 @@ def _render_tabletop_sorter(
     plural_label = pluralize_label(study.item_label).lower()
     if is_freeform:
         st.caption(
-            f"Drag a {item_label} into the workspace to start a new named pile, then move {plural_label} "
-            f"between piles. You can also select a {item_label}, then choose a pile or create a new one."
+            f"Drag a {item_label} into the workspace to start a new pile, then move {plural_label} "
+            f"between piles. New piles are numbered automatically; use Rename on a pile when you are ready."
         )
     else:
         st.caption(
@@ -86,6 +99,8 @@ def _render_tabletop_sorter(
     move_seen_key = f"{prefix}_move_seen_{session_token}"
     undo_seen_key = f"{prefix}_undo_seen_{session_token}"
     create_seen_key = f"{prefix}_create_seen_{session_token}"
+    rename_seen_key = f"{prefix}_rename_seen_{session_token}"
+    default_names_key = f"freeform_default_categories_{session_token}"
     announcement_key = f"{prefix}_announcement_{session_token}"
     focus_key = f"{prefix}_focus_target_{session_token}"
 
@@ -138,22 +153,16 @@ def _render_tabletop_sorter(
         st.session_state[create_seen_key] = event_id
 
         card_id = str(create.get("card_id") or "")
-        clean_name = str(create.get("category_name") or "").strip()
         placements = st.session_state.get("placements", {})
         source = _card_location(placements, card_id)
-        existing_names = {category.casefold() for category in st.session_state["categories"]}
         if card_id not in cards_by_id or not source:
             return
-        if not clean_name:
-            st.session_state[announcement_key] = "Enter a name for the new pile."
-            return
-        if clean_name.casefold() == "unassigned" or clean_name.casefold() in existing_names:
-            st.session_state[announcement_key] = "Choose a unique name for the new pile."
-            return
+        clean_name = _next_default_category_name(st.session_state["categories"])
 
         st.session_state["categories"].append(clean_name)
         st.session_state["placements"][clean_name] = []
         st.session_state["category_descriptions"][clean_name] = ""
+        st.session_state.setdefault(default_names_key, []).append(clean_name)
         history = st.session_state.setdefault(history_key, [])
         history.append(
             {"card_id": card_id, "source": source, "target": clean_name, "created_category": clean_name}
@@ -171,7 +180,48 @@ def _render_tabletop_sorter(
             )
         if method == "keyboard":
             st.session_state[focus_key] = {"kind": "card", "card_id": card_id}
-        st.session_state[announcement_key] = f"Created {clean_name} and moved {cards_by_id[card_id].title} there."
+        st.session_state[announcement_key] = (
+            f"Created {clean_name} and moved {cards_by_id[card_id].title} there. "
+            "Use Rename on the pile when you are ready."
+        )
+
+    def handle_rename():
+        rename = _component_state_value(component_key, "rename")
+        if not isinstance(rename, dict) or not (is_freeform and study.allow_rename_categories):
+            return
+        event_id = str(rename.get("event_id") or "")
+        if not event_id or st.session_state.get(rename_seen_key) == event_id:
+            return
+        st.session_state[rename_seen_key] = event_id
+
+        old_name = str(rename.get("old_name") or "")
+        clean_name = str(rename.get("new_name") or "").strip()
+        categories = st.session_state.get("categories", [])
+        placements = st.session_state.get("placements", {})
+        other_names = {name.casefold() for name in categories if name != old_name}
+        if old_name not in categories or old_name not in placements:
+            return
+        if not clean_name:
+            st.session_state[announcement_key] = "Enter a name for this pile."
+            return
+        if clean_name.casefold() == "unassigned" or clean_name.casefold() in other_names:
+            st.session_state[announcement_key] = "Choose a unique pile name."
+            return
+        if clean_name == old_name:
+            return
+
+        placements[clean_name] = placements.pop(old_name)
+        categories[categories.index(old_name)] = clean_name
+        descriptions = st.session_state.get("category_descriptions", {})
+        descriptions[clean_name] = descriptions.pop(old_name, "")
+        if old_name in st.session_state.get(default_names_key, []):
+            st.session_state[default_names_key].remove(old_name)
+        _clear_tabletop_history(session_token)
+        if participant_service:
+            participant_service.record_interaction(
+                session_token, study, "category_renamed", {"from": old_name, "to": clean_name}
+            )
+        st.session_state[announcement_key] = f"Renamed {old_name} to {clean_name}."
 
     def handle_undo():
         undo = _component_state_value(component_key, "undo")
@@ -211,6 +261,8 @@ def _render_tabletop_sorter(
             del st.session_state["placements"][created_category]
             st.session_state["categories"].remove(created_category)
             st.session_state["category_descriptions"].pop(created_category, None)
+            if created_category in st.session_state.get(default_names_key, []):
+                st.session_state[default_names_key].remove(created_category)
             st.session_state[announcement_key] = f"Last move undone and empty pile “{created_category}” removed."
         else:
             st.session_state[announcement_key] = f"Last move undone. {cards_by_id[card_id].title} returned to {source}."
@@ -268,6 +320,7 @@ def _render_tabletop_sorter(
         on_move=handle_move,
         on_undo=handle_undo,
         on_create=handle_create,
+        on_rename=handle_rename,
     )
     if not mounted:
         st.error("The interactive tabletop needs Streamlit 1.65 or newer. The app is still loading the required update.")
